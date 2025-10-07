@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8" />
+  <title>Notebook Booking</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <!-- Tema: Verde · Giallo · Blu -->
+  <style>
+    :root{
+      /* Palette */
+      --blue-600:#1d4ed8;
+      --blue-500:#2563eb;
+      --blue-50:#eef2ff;
+
+      --green-600:#16a34a;
+      --green-500:#22c55e;
+      --green-50:#ecfdf5;
+
+      --yellow-500:#eab308;
+      --yellow-400:#facc15;
+      --yellow-50:#fffbeb;
+
+      --ink:#0f172a;       /* testo principale */
+      --muted:#64748b;     /* testo secondario */
+      --border:#e6e7ef;    /* bordi soft */
+      --bg:#f6f8ff;        /* sfondo pagina (azzurro molto chiaro) */
+      --card:#ffffff;      /* sfondo card */
+      --danger:#b30018;    /* solo per bottoni pericolo */
+      --danger-bg:#ffebef;
+      --danger-bd:#ffd1db;
+
+      --radius:14px;
+      --shadow:0 6px 18px rgba(37,99,235,.08);
+      --shadow-soft:0 2px 6px rgba(2,6,23,.06);
+      --focus-ring:0 0 0 3px rgba(34,197,94,.25);
+    }
+
+    /* Base */
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:24px;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      color:var(--ink);
+      background:
+        radial-gradient(1200px 600px at -10% -10%, var(--blue-50), transparent 60%),
+        radial-gradient(1200px 600px at 110% -10%, var(--green-50), transparent 60%),
+        radial-gradient(1200px 600px at 50% 120%, var(--yellow-50), transparent 60%),
+        var(--bg);
+    }
+    h1{margin:0 0 12px;font-size:28px;letter-spacing:.2px}
+    h2{margin:0 0 10px;font-size:20px}
+
+    /* Top bar */
+    .brand{
+      display:flex;align-items:center;gap:10px;margin-bottom:14px
+    }
+    .logo{
+      width:34px;height:34px;border-radius:10px;
+      background:
+        conic-gradient(from 210deg, var(--blue-500), var(--green-500), var(--yellow-500), var(--blue-500));
+      box-shadow:var(--shadow-soft);
+      position:relative;isolation:isolate;
+    }
+    .logo::after{
+      content:"";position:absolute;inset:3px;border-radius:8px;background:#fff;
+      mix-blend:screen;opacity:.35
+    }
+    .brand small{color:var(--muted)}
+
+    /* Layout */
+    .grid{display:grid;gap:16px;grid-template-columns:repeat(12,1fr)}
+    .col-12{grid-column:span 12}
+    .col-6{grid-column:span 6}
+    .col-4{grid-column:span 4}
+    @media (max-width:1000px){ .col-6,.col-4{grid-column:span 12} }
+
+    /* Card */
+    .card{
+      background:var(--card);
+      border:1px solid var(--border);
+      border-radius:var(--radius);
+      padding:16px;
+      box-shadow:var(--shadow);
+    }
+
+    /* Inputs */
+    .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+    input,select{
+      padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:#fff;
+      outline:none;box-shadow:0 0 0 rgba(0,0,0,0);transition:.15s;
+    }
+    input:focus,select:focus{box-shadow:var(--focus-ring);border-color:var(--green-500)}
+    .w-2{width:220px}
+
+    /* Buttons */
+    .btn{padding:10px 14px;border-radius:10px;border:1px solid transparent;cursor:pointer;transition:.15s}
+    .btn:disabled{opacity:.6;cursor:not-allowed}
+    .btn-primary{background:linear-gradient(180deg,var(--blue-500),var(--blue-600));color:#fff;box-shadow:0 6px 14px rgba(29,78,216,.18)}
+    .btn-primary:hover{filter:brightness(1.05)}
+    .btn-success{background:linear-gradient(180deg,var(--green-500),var(--green-600));color:#0b2215; border-color:rgba(34,197,94,.3);box-shadow:0 6px 14px rgba(34,197,94,.22)}
+    .btn-success:hover{filter:brightness(1.03)}
+    .btn-warning{background:linear-gradient(180deg,var(--yellow-400),var(--yellow-500));color:#3b2f03;border-color:rgba(234,179,8,.35);box-shadow:0 6px 14px rgba(234,179,8,.18)}
+    .btn-ghost{background:#fff;border:1px solid var(--border)}
+    .btn-danger{background:var(--danger-bg);border:1px solid var(--danger-bd);color:var(--danger)}
+    .right{margin-left:auto}
+
+    /* Pills / status */
+    .muted{color:var(--muted)}
+    .ok{background:var(--green-50);border:1px solid rgba(34,197,94,.35);color:#0f5132;padding:6px 8px;border-radius:10px}
+    .danger{background:#fff1f2;border:1px solid #fecdd3;color:#881337;padding:6px 8px;border-radius:10px}
+
+    /* Tables */
+    table{width:100%;border-collapse:collapse}
+    th,td{padding:10px;border-bottom:1px solid var(--border);text-align:left}
+    th{background:linear-gradient(180deg, #fff, #f8fbff)}
+    tbody tr:hover{background:rgba(37,99,235,.04)}
+
+    .hidden{display:none}
+  </style>
+</head>
+<body>
+  <div class="brand">
+    <div class="logo" aria-hidden="true"></div>
+    <div>
+      <h1>Notebook Booking</h1>
+      <small>gestione prenotazioni • verde · giallo · blu</small>
+    </div>
+  </div>
+
+  <div class="grid">
+    <!-- AUTH -->
+    <div class="card col-6" id="authCard">
+      <h2>Accesso</h2>
+      <div class="row">
+        <input id="email" type="email" placeholder="Email" />
+        <input id="password" type="password" placeholder="Password" />
+        <button id="btnLogin" class="btn btn-primary">Login</button>
+        <button id="btnRegister" class="btn btn-success">Registrati</button>
+      </div>
+      <div id="authMsg" class="muted" style="margin-top:8px"></div>
+    </div>
+
+    <!-- PROFILO -->
+    <div class="card col-6 hidden" id="meCard">
+      <div class="row">
+        <div>Utente: <strong id="meEmail"></strong> – Ruolo: <strong id="meRole"></strong></div>
+        <button id="btnLogout" class="btn btn-ghost right">Logout</button>
+      </div>
+    </div>
+
+    <!-- PRENOTAZIONE -->
+    <div class="card col-12 hidden" id="bookingCard">
+      <h2>Nuova prenotazione</h2>
+      <div class="row">
+        <select id="nbSelect" class="w-2"></select>
+        <input id="date" type="date" />
+        <input id="time" type="time" step="1800" />
+        <input id="docente" class="w-2" placeholder="Docente (nome e cognome)" />
+        <input id="classe" class="w-2" placeholder="Classe" />
+        <input id="aula" class="w-2" placeholder="Aula" />
+        <button id="btnBook" class="btn btn-success">Prenota</button>
+        <span id="bookMsg" class="muted"></span>
+      </div>
+    </div>
+
+    <!-- LE MIE PRENOTAZIONI -->
+    <div class="card col-12 hidden" id="myBookingsCard">
+      <h2>Le mie prenotazioni</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>#</th><th>Notebook</th><th>Data</th><th>Ora</th>
+            <th>Docente</th><th>Classe</th><th>Aula</th>
+            <th>Azioni</th>
+          </tr>
+        </thead>
+        <tbody id="bookingsBody"></tbody>
+      </table>
+    </div>
+
+    <!-- NOTEBOOK DISPONIBILI (pubblico) -->
+    <div class="card col-12">
+      <div class="row" style="align-items:baseline">
+        <h2>Notebook disponibili</h2>
+        <button id="btnRefreshNb" class="btn btn-warning right">Aggiorna elenco</button>
+      </div>
+      <div class="muted" id="nbCount" style="margin:6px 0"></div>
+      <table>
+        <thead><tr><th>#</th><th>Nome</th></tr></thead>
+        <tbody id="nbList"></tbody>
+      </table>
+    </div>
+
+    <!-- ADMIN -->
+    <div class="card col-12 hidden" id="adminArea">
+      <h2>Gestione Notebook (Admin)</h2>
+      <div class="row" style="margin-bottom:8px">
+        <input id="nbNewName" placeholder="Nuovo notebook..." />
+        <label><input type="checkbox" id="nbNewActive" checked> Attivo</label>
+        <button id="btnNbAdd" class="btn btn-primary">Aggiungi</button>
+      </div>
+      <table>
+        <thead>
+          <tr><th>#</th><th>Nome</th><th>Attivo</th><th>Azioni</th></tr>
+        </thead>
+        <tbody id="adminNbBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Logica invariata -->
+  <script src="app.js"></script>
+</body>
+</html>
