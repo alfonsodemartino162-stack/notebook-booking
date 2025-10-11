@@ -1,0 +1,12 @@
+﻿services:
+  - type: web
+    name: notebook-booking
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: 20.x
+      - key: NPM_CONFIG_BUILD_FROM_SOURCE
+        value: "true"
