@@ -1,0 +1,562 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Prenotazione Carrelli</title>
+<style>
+:root{--blue:#1e88e5;--green:#2e7d32;--yellow:#f9a825;--ink:#0f172a;--muted:#64748b;--bg:#f8fafc;--card:#ffffff;--line:#e2e8f0;--red:#e53935;}
+*{box-sizing:border-box} html,body{height:100%}
+body{margin:0;padding:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,Ubuntu,Cantarell,Noto Sans,Arial;background:var(--bg);color:var(--ink)}
+.container{max-width:1200px;margin:28px auto;padding:0 16px}
+h1{margin:0 0 6px;font-size:28px;font-weight:800}.subtitle{margin:0 0 20px;color:var(--muted)}
+.grid{display:grid;grid-template-columns:repeat(12,1fr);gap:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;box-shadow:0 1px 0 rgba(10,20,40,.03)}
+.span-4{grid-column:span 12}.span-8{grid-column:span 12}.span-12{grid-column:span 12}
+@media(min-width:960px){.span-4{grid-column:span 4}.span-8{grid-column:span 8}}
+input,select,button,textarea{font:inherit;padding:.55rem .7rem;border:1px solid var(--line);border-radius:10px;outline:none}
+input:focus,select:focus,textarea:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(30,136,229,.15)}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:.5rem 0}
+.row>label{min-width:220px;color:var(--muted)} .muted{color:var(--muted);font-size:.9rem}
+.btn{border:none;cursor:pointer;transition:transform .03s ease,filter .2s ease}.btn:active{transform:translateY(1px)}
+.btn-primary{background:var(--blue);color:#fff}.btn-success{background:var(--green);color:#fff}.btn-ghost{background:transparent;color:var(--blue);border:1px solid var(--blue)}
+.btn-warning{background:var(--yellow);color:#111}.btn-danger{background:var(--red);color:#fff}
+.btn-sm{padding:.4rem .6rem;border-radius:10px}.btn-lg{padding:.6rem 1rem;border-radius:12px;font-weight:600}.btn-block{width:100%}
+.pill{display:inline-block;padding:.2rem .5rem;border-radius:999px;font-size:.8rem;border:1px solid var(--line);background:#fff}
+.pill-blue{background:rgba(30,136,229,.08);border-color:rgba(30,136,229,.25);color:#0b66c3}
+.pill-red{background:rgba(229,57,53,.10);border-color:rgba(229,57,53,.35);color:#a3120f}
+ul{list-style:none;padding:0;margin:0} li+li{border-top:1px dashed var(--line)}
+.item{padding:10px 0;display:flex;align-items:center;gap:12px;justify-content:space-between;flex-wrap:wrap}
+.item-meta{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.right-actions{display:flex;gap:8px;align-items:center}
+.bar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}
+.brand{display:flex;gap:10px;align-items:center}.dot{width:12px;height:12px;border-radius:3px;background:linear-gradient(135deg,var(--blue),#4fc3f7)}
+.userbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.chip{border:1px solid var(--line);background:#fff;border-radius:999px;padding:.25rem .6rem;font-size:.9rem}
+.divider{height:1px;background:var(--line);margin:8px 0 12px}.legend{display:flex;gap:8px;flex-wrap:wrap}
+
+/* PERIODI */
+.periods{display:grid;grid-template-columns:repeat(3,minmax(120px,1fr));gap:8px;align-items:stretch}
+@media(min-width:900px){.periods{grid-template-columns:repeat(6,minmax(110px,1fr));}}
+.period{display:flex;align-items:center;gap:8px;padding:6px 10px;border:1px dashed var(--line);border-radius:10px;background:#fff;font-size:.9rem;min-height:36px}
+.period.available{background:rgba(30,136,229,.08);border-color:rgba(30,136,229,.25)}
+.period.booked{background:rgba(229,57,53,.12);border-color:rgba(229,57,53,.35)}
+.period.disabled{opacity:.55}
+.period input{flex:0 0 auto}
+.period .pidx{font-weight:700;min-width:1.6em;text-align:right;font-size:.9em}
+
+/* TESTO DEL PERIODO: una riga, piccolo, senza ellissi */
+.period .pname{
+  flex:1 1 auto;min-width:0;
+  font-size:.8rem;line-height:1.1;
+  white-space:nowrap;overflow:hidden;text-overflow:clip;
+}
+
+/* TABLE & toast */
+.table{width:100%;border-collapse:collapse}
+.table th,.table td{padding:8px;border-bottom:1px dashed var(--line);text-align:left}
+.badge{padding:.1rem .4rem;border-radius:999px;border:1px solid var(--line);font-size:.8rem}
+.badge-ok{background:rgba(46,125,50,.08);color:#1b5e20;border-color:rgba(46,125,50,.25)}
+.badge-no{background:rgba(229,57,53,.08);color:#a3120f;border-color:rgba(229,57,53,.25)}
+.toast{position:fixed;right:16px;bottom:16px;z-index:50;display:none;min-width:260px;max-width:420px;background:#fff;border:1px solid var(--line);border-left:6px solid var(--green);border-radius:12px;padding:12px 14px;box-shadow:0 10px 30px rgba(1,12,60,.12)}
+.toast .title{font-weight:700;margin-bottom:4px}.toast .desc{color:var(--muted)}
+details>summary{cursor:pointer;color:#0b66c3}
+.small{font-size:.9rem}
+textarea{width:100%;min-height:120px}
+kbd{background:#f1f5f9;border:1px solid var(--line);border-bottom-color:#cbd5e1;border-radius:6px;padding:.1rem .4rem}
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="bar">
+    <div class="brand">
+      <span class="dot"></span>
+      <div>
+        <h1>⚓Prenotazione Carrelli Notebook/Chromebook IIS "NINO BIXIO" Piano di Sorrento⚓</h1>
+        <div class="subtitle"> con pochi click prenota i tuoi device by 
+  <span style="font-weight: bold; color: #007bff;">Alfonso De Martino</span></div>
+      </div>
+    </div>
+    <div class="userbar">
+      <span id="clock" class="chip">--:--</span>
+      <span id="userStatus" class="chip">Non autenticato</span>
+      <button id="btnLogout" class="btn btn-ghost" style="display:none">Logout</button>
+    </div>
+  </div>
+
+  <div class="grid">
+    <!-- ACCESSO -->
+    <section class="card span-4">
+      <h3 style="margin:0 0 8px">Accesso</h3>
+      <details open>
+        <summary><b>Docente</b></summary>
+        <div class="row"><input id="fn" placeholder="Nome (opzionale)" style="flex:1"></div>
+        <div class="row"><input id="ln" placeholder="Cognome (opzionale)" style="flex:1"></div>
+        <div class="row"><input id="code" placeholder="Codice docente" style="flex:1"></div>
+        <div class="row" style="gap:8px"><button id="btnLoginCode" class="btn btn-primary btn-lg">Entra</button></div>
+      </details>
+
+      <div class="divider"></div>
+
+      <details>
+        <summary><b>Admin (email + password)</b></summary>
+        <div class="row"><input id="email" placeholder="email admin" style="flex:1"></div>
+        <div class="row"><input id="pwd" type="password" placeholder="password" style="flex:1"></div>
+        <div class="row"><button id="btnLoginAdmin" class="btn btn-ghost btn-lg">Entra come admin</button></div>
+      </details>
+    </section>
+
+    <!-- NUOVA PRENOTAZIONE -->
+    <section class="card span-8">
+      <h3 style="margin:0 0 8px">Nuova prenotazione</h3>
+      <div class="row"><label>Numero di notebook/chromebook (1–30)</label><input id="b_nbCount" type="number" min="1" max="30" value="15" style="width:160px"></div>
+      <div class="row"><label>Data</label><input id="b_date" type="date"></div>
+      <div class="row"><label>Carrello</label>
+        <select id="b_cart" style="min-width:260px"><option value="">— Seleziona carrello —</option></select>
+        <button id="btnReloadCarts" class="btn btn-ghost">Aggiorna</button>
+      </div>
+      <div class="row"><label>Periodi (seleziona più ore)</label><div id="periodsWrap" class="periods"></div></div>
+      <div class="row"><label>Legenda</label><div class="legend"><span class="pill pill-blue">Disponibile</span><span class="pill pill-red">Prenotato</span></div></div>
+      <div class="row"><label>Nome docente</label><input id="b_teacherFirst" placeholder="es. Mario" style="flex:1"></div>
+      <div class="row"><label>Cognome docente</label><input id="b_teacherLast" placeholder="es. Rossi" style="flex:1"></div>
+      <div class="row"><label>Classe</label><input id="b_class" placeholder="es. 3B" style="width:140px"></div>
+      <div class="row"><label>Aula</label><input id="b_room" placeholder="es. 12" style="width:140px"></div>
+      <div class="row" style="margin-top:.4rem"><button class="btn btn-success btn-lg" id="btnBook">Prenota</button><span class="muted" id="bookMsg"></span></div>
+    </section>
+
+    <!-- LE MIE PRENOTAZIONI -->
+    <section class="card span-12">
+      <h3 style="margin:0 0 8px">Le mie prenotazioni</h3>
+      <div class="row"><button class="btn btn-primary btn-sm" id="btnMy">Aggiorna elenco prenotazioni</button></div>
+      <ul id="my" style="margin-top:8px"></ul>
+    </section>
+
+    <!-- ADMIN: CARRELLI -->
+    <section class="card span-12" id="adminCarrelli" style="display:none">
+      <h3 style="margin:0 0 8px">Gestione carrelli (Admin)</h3>
+      <div class="row" style="gap:8px">
+        <input id="newCartName" placeholder="Nome carrello (es. Carrello 5)" style="min-width:260px">
+        <label><input id="newCartActive" type="checkbox" checked> Attivo</label>
+        <button class="btn btn-success btn-sm" id="btnAddCart">Aggiungi carrello</button>
+        <input id="bulkBase" placeholder="Base es. Carrello" style="width:160px" value="Carrello">
+        <input id="bulkStart" type="number" value="5" style="width:90px">
+        <input id="bulkCount" type="number" value="10" style="width:90px">
+        <button class="btn btn-primary btn-sm" id="btnBulkCarts">Aggiungi N carrelli</button>
+        <button class="btn btn-ghost btn-sm" id="btnAdminReloadCarts">Aggiorna elenco carrelli</button>
+      </div>
+      <table class="table" style="margin-top:6px">
+        <thead><tr><th>ID</th><th>Nome</th><th>Attivo</th><th>Azioni</th></tr></thead>
+        <tbody id="cartsBody"><tr><td colspan="4" class="muted">Nessun dato</td></tr></tbody>
+      </table>
+    </section>
+
+    <!-- ADMIN: PRENOTAZIONI -->
+    <section class="card span-12" id="adminPrenotazioni" style="display:none">
+      <h3 style="margin:0 0 8px">Tutte le prenotazioni (Admin)</h3>
+      <div class="row"><button id="btnAdminLoadBookings" class="btn btn-primary btn-sm">Aggiorna elenco prenotazioni</button></div>
+      <ul id="adminBookings" style="margin-top:8px"></ul>
+    </section>
+
+    <!-- ADMIN: DOCENTI -->
+    <section class="card span-12" id="adminDocenti" style="display:none">
+      <h3 style="margin:0 0 8px">Gestione docenti (Admin)</h3>
+      <div class="row" style="gap:8px">
+        <input id="t_first" placeholder="Nome" style="width:160px">
+        <input id="t_last" placeholder="Cognome" style="width:180px">
+        <input id="t_code" placeholder="Codice docente" style="width:180px">
+        <input id="t_email" placeholder="Email (opzionale)" style="width:220px">
+        <select id="t_role" style="width:140px">
+          <option value="user">Ruolo: user</option>
+          <option value="admin">Ruolo: admin</option>
+        </select>
+        <label><input id="t_active" type="checkbox" checked> Attivo</label>
+        <button class="btn btn-success btn-sm" id="btnAddTeacher">Aggiungi docente</button>
+        <button class="btn btn-ghost btn-sm" id="btnLoadTeachers">Aggiorna elenco</button>
+      </div>
+
+      <details style="margin-top:8px">
+        <summary><b>Import CSV</b> <span class="muted small">(intestazione facoltativa; separatore ; , o tab)</span></summary>
+        <div class="row small muted">Formato: <kbd>Nome</kbd>;<kbd>Cognome</kbd>;<kbd>Codice</kbd>;<kbd>Email</kbd>;<kbd>Ruolo</kbd>;<kbd>Attivo(1/0)</kbd></div>
+        <textarea id="csvArea" placeholder="Mario;Rossi;MR123;mar.rossi@scuola.it;user;1"></textarea>
+        <div class="row"><button class="btn btn-primary btn-sm" id="btnImportCSV">Importa CSV</button></div>
+        <div class="row"><span id="csvResult" class="muted"></span></div>
+      </details>
+
+      <details style="margin-top:8px">
+        <summary><b>Bulk JSON</b> <span class="muted small">(array di docenti)</span></summary>
+        <textarea id="jsonArea" placeholder='[{"first_name":"Paolo","last_name":"Verdi","teacher_code":"PV001","email":"p.verdi@scuola.it","role":"user","active":true}]'></textarea>
+        <div class="row"><button class="btn btn-primary btn-sm" id="btnBulkJSON">Invia bulk JSON</button></div>
+        <div class="row"><span id="jsonResult" class="muted"></span></div>
+      </details>
+
+      <table class="table" style="margin-top:10px">
+        <thead><tr><th>ID</th><th>Nome</th><th>Cognome</th><th>Codice</th><th>Email</th><th>Ruolo</th><th>Attivo</th><th>Azioni</th></tr></thead>
+        <tbody id="teachersBody"><tr><td colspan="8" class="muted">Nessun docente</td></tr></tbody>
+      </table>
+    </section>
+  </div>
+</div>
+
+<div class="toast" id="toast"><div class="title" id="toastTitle">Operazione riuscita</div><div class="desc" id="toastDesc">Dettagli azione</div></div>
+
+<script>
+const api=(p,opt={})=>fetch(p,opt).then(async r=>{const d=await r.json().catch(()=>({})); if(!r.ok) throw d; return d;});
+let token=null, me=null, periodsCache=[], cartsCache=[];
+const auth=()=>token?{'Authorization':'Bearer '+token}:{};
+
+function showToast(title,desc='',kind='success'){
+  const t=document.getElementById('toast'),ti=document.getElementById('toastTitle'),de=document.getElementById('toastDesc');
+  const yellow=getComputedStyle(document.documentElement).getPropertyValue('--yellow');
+  const green=getComputedStyle(document.documentElement).getPropertyValue('--green');
+  t.style.borderLeftColor = kind==='warn'?yellow:green; ti.textContent=title; de.textContent=desc||'';
+  t.style.display='block'; clearTimeout(window._tHide); window._tHide=setTimeout(()=>t.style.display='none',3000);
+}
+
+// Orologio
+(function(){ const el=document.getElementById('clock');
+  const d=new Intl.DateTimeFormat('it-IT',{timeZone:'Europe/Rome',year:'numeric',month:'2-digit',day:'2-digit'});
+  const t=new Intl.DateTimeFormat('it-IT',{timeZone:'Europe/Rome',hour:'2-digit',minute:'2-digit'});
+  const tick=()=>{const now=new Date(); el.textContent=d.format(now)+' '+t.format(now);}; tick(); setInterval(tick,30000);
+})();
+
+function renderUserBar(){
+  const us=document.getElementById('userStatus'), lo=document.getElementById('btnLogout');
+  const isAdmin=!!(me&&me.role==='admin');
+  if(me){ const name = (me.first_name||me.last_name)? `${me.first_name||''} ${me.last_name||''}`.trim() : (me.email||'utente');
+    us.textContent='Connesso come: '+name; lo.style.display='inline-block';
+    if (me.first_name) document.getElementById('b_teacherFirst').value = me.first_name;
+    if (me.last_name)  document.getElementById('b_teacherLast').value  = me.last_name;
+  } else { us.textContent='Non autenticato'; lo.style.display='none'; }
+  document.getElementById('adminCarrelli').style.display = isAdmin?'block':'none';
+  document.getElementById('adminPrenotazioni').style.display = isAdmin?'block':'none';
+  document.getElementById('adminDocenti').style.display = isAdmin?'block':'none';
+}
+
+// Carrelli & Periodi
+async function loadCarts(){
+  try{
+    cartsCache=await api('/api/notebooks');
+    b_cart.innerHTML='<option value="">— Seleziona carrello —</option>'+cartsCache.map(c=>`<option value="${c.id}">#${c.id} – ${escapeHtml(c.name)}</option>`).join('');
+  }catch{ cartsCache=[]; b_cart.innerHTML='<option value="">— Nessun carrello attivo —</option>'; }
+}
+async function loadPeriods(){
+  try{ periodsCache=await api('/api/periods'); renderPeriods([]); }
+  catch{ periodsCache=[]; renderPeriods([]); }
+}
+function renderPeriods(disabledIds){
+  const wrap=document.getElementById('periodsWrap');
+  wrap.innerHTML = periodsCache.map(p=>{
+    const booked = disabledIds.includes(p.id);
+    const cls = booked ? 'period booked disabled' : 'period available';
+    const fullName = p.name || '';
+    const shortName = fullName.replace(/\s*ora\s*$/i,'').trim(); // << rimuove "ora"
+    const title = `${p.ord}. ${fullName}`;
+    return `<label class="${cls}" title="${escapeHtml(title)}">
+      <input type="checkbox" class="pcheck" value="${p.id}" ${booked?'disabled':''}>
+      <span class="pidx">${p.ord}.</span>
+      <span class="pname">${escapeHtml(shortName)}</span>
+    </label>`;
+  }).join('') || '<div class="muted">Nessun periodo configurato</div>';
+}
+async function refreshDisabledPeriods(){
+  const date=b_date.value||null; const cartId=b_cart.value?Number(b_cart.value):null;
+  if(!date||!cartId){ renderPeriods([]); return; }
+  const disabled=[];
+  for(const p of periodsCache){
+    try{
+      const qs=new URLSearchParams({date,periodId:String(p.id)});
+      const lst=await api('/api/availability?'+qs.toString());
+      const row=lst.find(x=>x.id===cartId); if(row && row.booked) disabled.push(p.id);
+    }catch{}
+  }
+  renderPeriods(disabled);
+}
+b_date.addEventListener('change',refreshDisabledPeriods);
+b_cart.addEventListener('change',refreshDisabledPeriods);
+
+// Login
+btnLoginCode.onclick = async ()=>{
+  try{
+    const firstName=(fn.value||'').trim(), lastName=(ln.value||'').trim(), codeVal=(code.value||'').trim();
+    if(!codeVal) return showToast('Inserisci il codice docente','','warn');
+
+    let res;
+    if (firstName && lastName) {
+      res = await api('/api/login-code',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({firstName,lastName,code:codeVal})});
+    } else {
+      res = await api('/api/login-code-only',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:codeVal})});
+      if (res.first_name) { fn.value=res.first_name; b_teacherFirst.value=res.first_name; }
+      if (res.last_name)  { ln.value=res.last_name;  b_teacherLast.value=res.last_name;  }
+    }
+
+    token=res.token; me=await api('/api/me',{headers:auth()}); renderUserBar(); showToast('Accesso docente OK');
+    await Promise.all([loadCarts(), loadPeriods()]); await refreshDisabledPeriods(); btnMy.click();
+    if (me.role==='admin') {
+      try{ await btnAdminReloadCarts?.click(); }catch{}
+      try{ await btnAdminLoadBookings?.click(); }catch{}
+      try{ await btnLoadTeachers?.click(); }catch{}
+    }
+  }catch(e){ showToast('Accesso negato', e.detail||'','warn'); }
+};
+
+// Admin
+btnLoginAdmin.onclick = async ()=>{
+  try{
+    const res=await api('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:email.value,password:pwd.value})});
+    token=res.token; me=await api('/api/me',{headers:auth()}); renderUserBar(); showToast('Accesso admin OK');
+    await Promise.all([loadCarts(), loadPeriods()]); await refreshDisabledPeriods();
+    btnMy.click();
+    try{ btnAdminReloadCarts?.click(); }catch{}
+    try{ btnAdminLoadBookings?.click(); }catch{}
+    try{ btnLoadTeachers?.click(); }catch{}
+  }catch(e){ showToast('Accesso admin negato', e.detail||'','warn'); }
+};
+
+// Prenotazioni (utente)
+btnBook.onclick = async ()=>{
+  if(!token) return showToast('Login richiesto','','warn');
+  const date=b_date.value||null; const cartId=b_cart.value?Number(b_cart.value):null;
+  if(!date) return showToast('Data mancante','','warn');
+  if(!cartId) return showToast('Carrello non selezionato','','warn');
+  const checks=[...document.querySelectorAll('.pcheck')].filter(x=>x.checked && !x.disabled);
+  if(!checks.length) return showToast('Seleziona almeno un periodo','','warn');
+
+  const payloadBase = {
+    notebookId:cartId, date, time:null,
+    teacherFirst:b_teacherFirst.value, teacherLast:b_teacherLast.value,
+    class_name:b_class.value||null, room:b_room.value||null
+  };
+  let ok=0, fail=0, msg='';
+  for(const cb of checks){
+    try{ await api('/api/bookings',{method:'POST',headers:{'Content-Type':'application/json',...auth()},body:JSON.stringify({...payloadBase, periodId:Number(cb.value)})}); ok++; }
+    catch(e){ fail++; msg=e.detail||msg; }
+  }
+  if(ok && !fail) showToast('Prenotazione completata',`Create ${ok} prenotazioni`);
+  else if(ok && fail) showToast('Parziale',`OK:${ok} | Errori:${fail} ${msg?'- '+msg:''}`,'warn');
+  else showToast('Nessuna prenotazione', msg||'','warn');
+  await Promise.all([btnMy.click(), refreshDisabledPeriods()]);
+};
+
+// Le mie prenotazioni
+btnMy.onclick = async ()=>{
+  if(!token) return showToast('Login richiesto','','warn');
+  const list=await api('/api/bookings',{headers:auth()});
+  if(!list.length){ my.innerHTML='<li class="muted" style="padding:8px 0">Nessuna prenotazione</li>'; return; }
+  my.innerHTML = list.map(x=>{
+    const slot = x.period_name ? `${x.period_name}${x.period_start&&x.period_end?' ('+x.period_start+'–'+x.period_end+')':''}` : (x.time||'');
+    return `<li class="item">
+      <div class="item-meta">
+        <span class="pill pill-blue">#${x.id}</span>
+        <span class="pill">Carrello: ${x.notebookId}</span>
+        <span class="pill">${x.date}</span>
+        ${slot?`<span class="pill">${slot}</span>`:''}
+        <span class="pill">Docente: ${[x.teacher_first,x.teacher_last].filter(Boolean).join(' ')}</span>
+        ${x.class_name?`<span class="pill">Classe: ${x.class_name}</span>`:''}
+        ${x.room?`<span class="pill">Aula: ${x.room}</span>`:''}
+      </div>
+      <div class="right-actions"><button class="btn btn-warning btn-sm" onclick="cancelBooking(${x.id})">Annulla</button></div>
+    </li>`;
+  }).join('');
+};
+
+window.cancelBooking = async (id)=>{
+  if(!token) return showToast('Login richiesto','','warn');
+  if(!confirm(`Vuoi annullare la prenotazione #${id}?`)) return;
+  try{ await api('/api/bookings/'+id,{method:'DELETE',headers:auth()}); showToast('Prenotazione annullata','#'+id); btnMy.click(); await refreshDisabledPeriods(); }
+  catch(e){ showToast('Errore annullamento', e.detail||'','warn'); }
+};
+
+// ADMIN: Carrelli
+btnAddCart.onclick = async ()=>{
+  if(!token) return showToast('Login richiesto','','warn');
+  try{
+    const body={name:newCartName.value,active:newCartActive.checked};
+    await api('/api/admin/notebooks',{method:'POST',headers:{'Content-Type':'application/json',...auth()},body:JSON.stringify(body)});
+    showToast('Carrello aggiunto'); newCartName.value=''; await btnAdminReloadCarts.click();
+  }catch(e){ showToast('Errore carrello', e.detail||'','warn'); }
+};
+btnBulkCarts.onclick = async ()=>{
+  if(!token) return showToast('Login richiesto','','warn');
+  try{
+    const body={base:bulkBase.value||'Carrello',startFrom:Number(bulkStart.value||1),count:Number(bulkCount.value||1)};
+    await api('/api/admin/notebooks/bulk',{method:'POST',headers:{'Content-Type':'application/json',...auth()},body:JSON.stringify(body)});
+    showToast('Carrelli creati'); await btnAdminReloadCarts.click();
+  }catch(e){ showToast('Errore bulk carrelli', e.detail||'','warn'); }
+};
+btnAdminReloadCarts.onclick = async ()=>{
+  if(!token) return showToast('Login richiesto','','warn');
+  const rows=await api('/api/admin/notebooks',{headers:auth()});
+  cartsBody.innerHTML = rows.map(r=>`
+    <tr>
+      <td>${r.id}</td>
+      <td><input value="${escapeHtml(r.name)}" style="width:220px" oninput="this.dataset.value=this.value" data-orig="${escapeHtml(r.name)}"></td>
+      <td><input type="checkbox" ${r.active? 'checked':''} oninput="this.dataset.value=this.checked" data-orig="${r.active?'1':'0'}"></td>
+      <td>
+        <button class="btn btn-primary btn-sm" onclick="updateCart(${r.id}, this)">Salva</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteCart(${r.id})">Elimina</button>
+      </td>
+    </tr>
+  `).join('') || `<tr><td colspan="4" class="muted">Nessun carrello</td></tr>`;
+};
+window.updateCart = async (id, btn)=>{
+  const tr = btn.closest('tr'); const [nameInp, actInp] = tr.querySelectorAll('input');
+  const name = nameInp.dataset.value ?? nameInp.value;
+  const active = (actInp.dataset.value ?? (actInp.checked?'true':'false')) === 'true';
+  try{
+    await api('/api/admin/notebooks/'+id,{method:'PUT',headers:{'Content-Type':'application/json',...auth()},body:JSON.stringify({name,active})});
+    showToast('Carrello aggiornato');
+    await Promise.all([btnAdminReloadCarts.click(), loadCarts(), refreshDisabledPeriods()]);
+  }catch(e){ showToast('Errore aggiornamento', e.detail||'','warn'); }
+};
+window.deleteCart = async (id)=>{
+  if(!confirm('Eliminare il carrello?')) return;
+  try{ await api('/api/admin/notebooks/'+id,{method:'DELETE',headers:auth()}); showToast('Carrello eliminato'); await btnAdminReloadCarts.click(); await loadCarts(); }
+  catch(e){ showToast('Eliminazione non possibile', e.detail||'','warn'); }
+};
+
+// ADMIN: Docenti
+btnLoadTeachers.onclick = async ()=>{
+  if(!token) return showToast('Login richiesto','','warn');
+  const rows=await api('/api/admin/teachers',{headers:auth()});
+  renderTeachers(rows);
+};
+function renderTeachers(rows){
+  teachersBody.innerHTML = rows.map(u=>`
+    <tr>
+      <td>${u.id}</td>
+      <td><input value="${escapeHtml(u.first_name||'')}" style="width:140px" data-id="${u.id}" data-k="first_name"></td>
+      <td><input value="${escapeHtml(u.last_name||'')}" style="width:160px" data-id="${u.id}" data-k="last_name"></td>
+      <td><input value="${escapeHtml(u.teacher_code||'')}" style="width:140px" data-id="${u.id}" data-k="teacher_code"></td>
+      <td><input value="${escapeHtml(u.email||'')}" style="width:220px" data-id="${u.id}" data-k="email"></td>
+      <td>
+        <select data-id="${u.id}" data-k="role">
+          <option value="user" ${u.role==='user'?'selected':''}>user</option>
+          <option value="admin" ${u.role==='admin'?'selected':''}>admin</option>
+        </select>
+      </td>
+      <td><input type="checkbox" ${u.active? 'checked':''} data-id="${u.id}" data-k="active"></td>
+      <td>
+        <button class="btn btn-primary btn-sm" onclick="saveTeacher(${u.id})">Salva</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteTeacher(${u.id})">Elimina</button>
+      </td>
+    </tr>
+  `).join('') || `<tr><td colspan="8" class="muted">Nessun docente</td></tr>`;
+}
+btnAddTeacher.onclick = async ()=>{
+  if(!token) return showToast('Login richiesto','','warn');
+  const body = {
+    first_name: t_first.value, last_name: t_last.value, teacher_code: t_code.value,
+    email: (t_email.value||null)||null, role: t_role.value, active: !!t_active.checked
+  };
+  try{
+    await api('/api/admin/teachers',{method:'POST',headers:{'Content-Type':'application/json',...auth()},body:JSON.stringify(body)});
+    showToast('Docente aggiunto');
+    t_first.value=''; t_last.value=''; t_code.value=''; t_email.value=''; t_role.value='user'; t_active.checked=true;
+    await btnLoadTeachers.click();
+  }catch(e){ showToast('Errore docente', e.detail||'','warn'); }
+};
+window.saveTeacher = async (id)=>{
+  const sel = `[data-id="${id}"]`;
+  const data = {};
+  document.querySelectorAll(sel).forEach(el=>{
+    const k = el.dataset.k;
+    if (el.type==='checkbox') data[k] = el.checked;
+    else data[k] = el.value;
+  });
+  try{
+    await api('/api/admin/teachers/'+id,{method:'PUT',headers:{'Content-Type':'application/json',...auth()},body:JSON.stringify(data)});
+    showToast('Docente aggiornato'); await btnLoadTeachers.click();
+  }catch(e){ showToast('Errore aggiornamento', e.detail||'','warn'); }
+};
+window.deleteTeacher = async (id)=>{
+  if(!confirm('Eliminare questo docente?')) return;
+  try{ await api('/api/admin/teachers/'+id,{method:'DELETE',headers:auth()}); showToast('Docente eliminato'); await btnLoadTeachers.click(); }
+  catch(e){ showToast('Eliminazione non possibile', e.detail||'','warn'); }
+};
+btnImportCSV.onclick = async ()=>{
+  if(!token) return showToast('Login richiesto','','warn');
+  try{
+    const res=await api('/api/admin/teachers/import',{method:'POST',headers:{'Content-Type':'application/json',...auth()},body:JSON.stringify({csv:csvArea.value||''})});
+    csvResult.textContent = `Creati: ${res.created} • Aggiornati: ${res.updated} • Skippati: ${res.skipped}${res.errors?.length? ' • Errori: '+res.errors.length : ''}`;
+    await btnLoadTeachers.click();
+  }catch(e){ showToast('Errore import CSV', e.detail||'','warn'); }
+};
+btnBulkJSON.onclick = async ()=>{
+  if(!token) return showToast('Login richiesto','','warn');
+  let arr;
+  try{ arr = JSON.parse(jsonArea.value||'[]'); }catch{ return showToast('JSON non valido','','warn'); }
+  try{
+    const res=await api('/api/admin/teachers/bulk',{method:'POST',headers:{'Content-Type':'application/json',...auth()},body:JSON.stringify({teachers:arr})});
+    jsonResult.textContent = `Creati: ${res.created} • Aggiornati: ${res.updated} • Skippati: ${res.skipped}${res.errors?.length? ' • Errori: '+res.errors.length : ''}`;
+    await btnLoadTeachers.click();
+  }catch(e){ showToast('Errore bulk JSON', e.detail||'','warn'); }
+};
+
+// ADMIN: Prenotazioni
+btnAdminLoadBookings.onclick = async ()=>{
+  if(!token) return showToast('Login richiesto','','warn');
+  const rows = await api('/api/admin/bookings',{headers:auth()});
+  renderAdminBookings(rows);
+};
+function renderAdminBookings(rows){
+  if(!rows.length){
+    adminBookings.innerHTML = '<li class="muted" style="padding:8px 0">Nessuna prenotazione</li>';
+    return;
+  }
+  adminBookings.innerHTML = rows.map(x=>{
+    const slot = x.period_name ? `${x.period_name}${x.period_start&&x.period_end?' ('+x.period_start+'–'+x.period_end+')':''}` : (x.time||'');
+    const docente = (x.teacher_first||x.u_first||'') + ' ' + (x.teacher_last||x.u_last||'');
+    return `<li class="item">
+      <div class="item-meta">
+        <span class="pill pill-blue">#${x.id}</span>
+        <span class="pill">Carrello: ${escapeHtml(x.notebook_name||('#'+x.notebookId))}</span>
+        <span class="pill">${x.date}</span>
+        ${slot?`<span class="pill">${escapeHtml(slot)}</span>`:''}
+        ${docente.trim()?`<span class="pill">Docente: ${escapeHtml(docente.trim())}</span>`:''}
+        ${x.class_name?`<span class="pill">Classe: ${escapeHtml(x.class_name)}</span>`:''}
+        ${x.room?`<span class="pill">Aula: ${escapeHtml(x.room)}</span>`:''}
+        ${x.user_email?`<span class="pill">${escapeHtml(x.user_email)}</span>`:''}
+      </div>
+      <div class="right-actions">
+        <button class="btn btn-warning btn-sm" onclick="adminCancelBooking(${x.id})">Annulla</button>
+      </div>
+    </li>`;
+  }).join('');
+}
+window.adminCancelBooking = async (id)=>{
+  if(!token) return showToast('Login richiesto','','warn');
+  if(!confirm(`Vuoi annullare la prenotazione #${id}?`)) return;
+  try{
+    await api('/api/bookings/'+id,{method:'DELETE',headers:auth()});
+    showToast('Prenotazione annullata dal pannello admin','#'+id);
+    await btnAdminLoadBookings.click();
+    try{ await Promise.all([refreshDisabledPeriods(), btnMy.click()]); }catch{}
+  }catch(e){ showToast('Errore annullamento', e.detail||'','warn'); }
+};
+
+// Helpers
+function escapeHtml(s){return String(s||'').replace(/[&<>"']/g,m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
+
+// Logout
+btnLogout.onclick=()=>{
+  token=null; me=null; renderUserBar();
+  const ids=['fn','ln','code','email','pwd','b_teacherFirst','b_teacherLast','b_class','b_room','csvArea','jsonArea'];
+  ids.forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
+  if (b_cart) b_cart.selectedIndex = 0;
+  document.querySelectorAll('.pcheck').forEach(cb=>cb.checked=false);
+  my.innerHTML=''; teachersBody.innerHTML='<tr><td colspan="8" class="muted">Nessun docente</td></tr>';
+  cartsBody.innerHTML='<tr><td colspan="4" class="muted">Nessun dato</td></tr>';
+  adminBookings.innerHTML='';
+  showToast('Disconnesso');
+};
+
+// Init
+(async function init(){
+  renderUserBar();
+  await Promise.all([loadCarts(), loadPeriods()]);
+  try{
+    const now = new Date();
+    b_date.value = new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10);
+  }catch{}
+})();
+</script>
+</body>
+</html>
