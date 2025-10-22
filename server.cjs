@@ -1,541 +1,664 @@
-// server.cjs - Prenotazione Carrelli (login con codice, code-only, periodi colorati, admin, bulk, import)
-const path = require("path");
-const fs = require("fs");
+// server.cjs
+// Notebook Booking – Backend Express + PostgreSQL (Neon)
+// API compatibili con il tuo index.html/app.js (periodi, disponibilità, login docente, admin, ecc.)
+
+require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
-const dotenv = require("dotenv");
+const path = require("path");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
 const nodemailer = require("nodemailer");
-const Database = require("better-sqlite3");
+const { Pool } = require("pg");
 
-dotenv.config();
-const PORT = process.env.PORT || 3000;
-const JWT_SECRET = process.env.JWT_SECRET || "changeme";
-const JWT_EXPIRE_MIN = parseInt(process.env.JWT_EXPIRE_MIN || "240", 10);
-const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "admin@demo.local";
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "changeme";
-const RESET_DB = process.env.RESET_DB === "1";
-const TZ = process.env.TZ || "Europe/Rome";
-const SMTP_DEBUG = process.env.SMTP_DEBUG === "1";
+// ---------- Config ----------
+const {
+  PORT = 3000,
+  APP_BASE_URL = "http://localhost:3000",
+  JWT_SECRET = "cambia_questa_chiave",
+  JWT_EXPIRE_MIN = "60",
+  ADMIN_EMAIL = "admin@bixio.local",
+  ADMIN_PASSWORD = "123456",
+  RESET_DB = "0",
+  TZ = "Europe/Rome",
+  DATABASE_URL,
+  SMTP_HOST,
+  SMTP_PORT,
+  SMTP_USER,
+  SMTP_PASS,
+  SMTP_SECURE = "false",
+  SMTP_FROM = 'Prenotazioni <noreply@scuola.test>',
+  SMTP_DEBUG = "0",
+} = process.env;
 
-// ===== DB =====
-const DATA_DIR = path.join(__dirname, "data");
-if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-const DB_PATH = path.join(DATA_DIR, "notebook-booking.db");
-if (RESET_DB && fs.existsSync(DB_PATH)) { fs.rmSync(DB_PATH); console.log("🧹 DB rimosso (RESET_DB=1)"); }
-const db = new Database(DB_PATH);
-db.pragma("foreign_keys = ON");
-db.pragma("journal_mode = WAL");
+process.env.TZ = TZ;
 
-// ===== Schema =====
-db.exec(`
-CREATE TABLE IF NOT EXISTS users (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  email TEXT UNIQUE,
-  password TEXT,
-  role TEXT,
-  active INTEGER NOT NULL DEFAULT 1,
-  created_at TEXT,
-  last_login_at TEXT,
-  first_name TEXT,
-  last_name  TEXT,
-  teacher_code TEXT UNIQUE
-);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email);
-
-CREATE TABLE IF NOT EXISTS notebooks (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  name TEXT UNIQUE NOT NULL,
-  active INTEGER NOT NULL DEFAULT 1
-);
-
-CREATE TABLE IF NOT EXISTS periods (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  ord INTEGER NOT NULL UNIQUE,
-  name TEXT NOT NULL UNIQUE,
-  start TEXT,
-  end   TEXT
-);
-
-CREATE TABLE IF NOT EXISTS bookings (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  userId INTEGER NOT NULL,
-  notebookId INTEGER NOT NULL,
-  date TEXT NOT NULL,
-  time TEXT,
-  periodId INTEGER,
-  teacher_first TEXT NOT NULL,
-  teacher_last  TEXT NOT NULL,
-  class_name TEXT,
-  room TEXT,
-  FOREIGN KEY(userId) REFERENCES users(id) ON DELETE CASCADE,
-  FOREIGN KEY(notebookId) REFERENCES notebooks(id) ON DELETE RESTRICT,
-  FOREIGN KEY(periodId) REFERENCES periods(id) ON DELETE RESTRICT
-);
-
-CREATE UNIQUE INDEX IF NOT EXISTS idx_bookings_unique_slot_time
-ON bookings (notebookId, date, time)
-WHERE time IS NOT NULL;
-
-CREATE UNIQUE INDEX IF NOT EXISTS idx_bookings_unique_slot_period
-ON bookings (notebookId, date, periodId)
-WHERE periodId IS NOT NULL;
-`);
-
-// Migrazioni soft
-function ensureColumn(table, col, typeSql) {
-  const cols = db.prepare(`PRAGMA table_info(${table})`).all();
-  if (!cols.find(c => c.name === col)) {
-    db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${typeSql}`);
-    console.log(`🧩 Migrazione: ${table}.${col} aggiunta`);
-  }
+// ---------- DB ----------
+if (!DATABASE_URL) {
+  console.error("❌ DATABASE_URL non definita nell’ambiente.");
+  process.exit(1);
 }
-ensureColumn("users", "active", "INTEGER NOT NULL DEFAULT 1");
-ensureColumn("users", "created_at", "TEXT");
-ensureColumn("users", "last_login_at", "TEXT");
-ensureColumn("users", "first_name", "TEXT");
-ensureColumn("users", "last_name", "TEXT");
-ensureColumn("users", "teacher_code", "TEXT");
+const pool = new Pool({
+  connectionString: DATABASE_URL,
+  ssl: { rejectUnauthorized: false },
+});
 
-// Seed base
-const findUserByEmail = db.prepare("SELECT id FROM users WHERE email = ?");
-if (!findUserByEmail.get(ADMIN_EMAIL)) {
-  const now = new Date().toISOString();
-  const hashed = bcrypt.hashSync(ADMIN_PASSWORD, 10);
-  db.prepare("INSERT INTO users (email,password,role,active,created_at) VALUES (?,?, 'admin', 1, ?)")
-    .run(ADMIN_EMAIL, hashed, now);
-  console.log(`✅ Admin creato: ${ADMIN_EMAIL} / ${ADMIN_PASSWORD}`);
+async function q(sql, params = []) {
+  const r = await pool.query(sql, params);
+  return r.rows;
 }
-if (db.prepare("SELECT COUNT(*) c FROM notebooks").get().c === 0) {
-  const seed = ["Carrello 1", "Carrello 2", "Carrello 3", "Carrello 4"];
-  const ins = db.prepare("INSERT INTO notebooks (name, active) VALUES (?, 1)");
-  const tx = db.transaction(arr => arr.forEach(n => ins.run(n)));
-  tx(seed);
-  console.log("🛒 Carrelli seed inseriti");
-}
-// Paracadute periodi 1→6
-(function ensurePeriodsSeed(){
-  const want = [
-    { ord:1, name:"Prima ora" }, { ord:2, name:"Seconda ora" },
-    { ord:3, name:"Terza ora" }, { ord:4, name:"Quarta ora"  },
-    { ord:5, name:"Quinta ora"}, { ord:6, name:"Sesta ora"   }
-  ];
-  const have = db.prepare("SELECT ord,name FROM periods").all();
-  if (have.length < 6) {
-    const missing = want.filter(w => !have.find(h => h.ord===w.ord || h.name===w.name));
-    if (missing.length){
-      const ins = db.prepare("INSERT OR IGNORE INTO periods (ord, name, start, end) VALUES (?, ?, NULL, NULL)");
-      const tx = db.transaction(arr => arr.forEach(r => ins.run(r.ord, r.name)));
-      tx(missing);
-      console.log("🕒 Periodi ripristinati:", missing.map(m=>m.name).join(", "));
-    }
-  }
-})();
-
-// Mail (opzionale)
-const FROM = process.env.SMTP_FROM || "Prenotazioni <noreply@scuola.test>";
-function getMailer() {
-  const { SMTP_HOST:h, SMTP_PORT:p, SMTP_USER:u, SMTP_PASS:pw } = process.env;
-  if (!h || !p || !u || !pw) return null;
-  const transporter = nodemailer.createTransport({
-    host: h, port: Number(p), secure: String(process.env.SMTP_SECURE||"false")==="true",
-    auth: { user:u, pass:pw }, tls:{ rejectUnauthorized:false, minVersion:"TLSv1.2" }
-  });
-  if (SMTP_DEBUG) console.log("✉️ SMTP:", {host:h, port:p, user:u?.slice(0,3)+"***"});
-  return transporter;
-}
-async function sendBookingMail({ type, to, booking, notebook, period }) {
-  const mailer = getMailer(); if (!mailer || !to) return;
-  const when = period ? `${period.name}${period.start&&period.end?` (${period.start}–${period.end})`:""}` : booking.time;
-  const subject = (type==="confirm"?"Conferma prenotazione: ":"Cancellazione prenotazione: ")+`${notebook.name} – ${booking.date} ${when}`;
-  const html = `<div style="font-family:system-ui,-apple-system,Segoe UI,Roboto">
-    <p>${type==="confirm"?"La tua prenotazione è stata <b>confermata</b>.":"La tua prenotazione è stata <b>cancellata</b>."}</p>
-    <ul>
-      <li><b>Carrello:</b> ${notebook.name}</li>
-      <li><b>Data:</b> ${booking.date}</li>
-      <li><b>Ora/Periodo:</b> ${when}</li>
-      <li><b>Docente:</b> ${[booking.teacher_first,booking.teacher_last].filter(Boolean).join(" ")}</li>
-      ${booking.class_name?`<li><b>Classe:</b> ${booking.class_name}</li>`:""}
-      ${booking.room?`<li><b>Aula:</b> ${booking.room}</li>`:""}
-    </ul>
-  </div>`;
-  try { await mailer.sendMail({ from: FROM, to, subject, html }); } catch(e){ console.warn("⚠️ mail prenotazione:", e.message); }
+async function qi(sql, params = []) {
+  const r = await pool.query(sql, params);
+  return r;
 }
 
-// Helpers
-const nameOk = s => typeof s==="string" && /^[A-Za-zÀ-ÖØ-öø-ÿ' -]{2,60}$/.test(String(s).trim());
-const hhmmOk = s => typeof s==="string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(s);
-const norm = s => String(s||"").trim().toLowerCase();
-function makeToken(payload, minutes = JWT_EXPIRE_MIN) {
-  return jwt.sign({ ...payload, exp: Math.floor(Date.now()/1000)+minutes*60 }, JWT_SECRET);
-}
-function getAuthUser(req, res) {
-  const h = req.headers.authorization || "";
-  if (!h.startsWith("Bearer ")) { res.status(401).json({ detail:"Token mancante" }); return null; }
-  try {
-    const tok = jwt.verify(h.slice(7), JWT_SECRET);
-    const u = db.prepare("SELECT id,email,role,active,first_name,last_name,teacher_code FROM users WHERE id=?").get(tok.id);
-    if (!u) { res.status(401).json({ detail:"Utente non trovato" }); return null; }
-    if (!u.active) { res.status(403).json({ detail:"Utente disattivato" }); return null; }
-    return u;
-  } catch { res.status(401).json({ detail:"Token non valido" }); return null; }
-}
-const getUserById = id => db.prepare("SELECT id,email,role,first_name,last_name,teacher_code,active FROM users WHERE id=?").get(id);
-const getNotebookById = id => db.prepare("SELECT id,name,active FROM notebooks WHERE id=?").get(id);
-const getPeriodById = id => db.prepare("SELECT id,ord,name,start,end FROM periods WHERE id=?").get(id);
-
-// App
+// ---------- App ----------
 const app = express();
 app.use(cors());
-app.use(express.json({ limit: "15mb" }));
+app.use(express.json({ limit: "1mb" }));
 
-const PUBLIC_DIR = path.join(__dirname, "public");
-if (fs.existsSync(PUBLIC_DIR)) app.use("/", express.static(PUBLIC_DIR, { extensions: ["html"] }));
-
-// Health
-app.get("/api/health", (_req, res) => res.json({ ok:true, tz:TZ }));
-
-// ===== Auth =====
-app.post("/api/login-code", (req, res) => {
-  const { firstName, lastName, code } = req.body || {};
-  if (!nameOk(firstName||"") || !nameOk(lastName||"") || !code) return res.status(400).json({ detail:"Nome, cognome e codice obbligatori" });
-  const u = db.prepare(`
-    SELECT id,first_name,last_name,teacher_code,role,active,email
-    FROM users
-    WHERE lower(trim(first_name)) = ? AND lower(trim(last_name)) = ? AND teacher_code = ?
-  `).get(norm(firstName), norm(lastName), String(code).trim());
-  if (!u) return res.status(401).json({ detail:"Dati non validi" });
-  if (!u.active) return res.status(403).json({ detail:"Account disattivato. Contatta l'amministratore." });
-  db.prepare("UPDATE users SET last_login_at=? WHERE id=?").run(new Date().toISOString(), u.id);
-  const token = makeToken({ id:u.id, role:u.role||"user" });
-  res.json({ token });
-});
-
-// login SOLO codice (usato in silenzio dal client se nome/cognome vuoti)
-app.post("/api/login-code-only", (req, res) => {
-  const { code } = req.body || {};
-  if (!code) return res.status(400).json({ detail:"Codice obbligatorio" });
-  const u = db.prepare(`
-    SELECT id,first_name,last_name,teacher_code,role,active,email
-    FROM users
-    WHERE teacher_code = ?
-  `).get(String(code).trim());
-  if (!u) return res.status(401).json({ detail:"Codice non trovato" });
-  if (!u.active) return res.status(403).json({ detail:"Account disattivato. Contatta l'amministratore." });
-  db.prepare("UPDATE users SET last_login_at=? WHERE id=?").run(new Date().toISOString(), u.id);
-  const token = makeToken({ id:u.id, role:u.role||"user" });
-  res.json({ token, first_name: u.first_name, last_name: u.last_name });
-});
-
-app.post("/api/login", (req, res) => {
-  const { email, password } = req.body || {};
-  if (!email || !password) return res.status(400).json({ detail:"Email e password obbligatorie" });
-  const row = db.prepare("SELECT id,email,password,role,active FROM users WHERE email=?").get(email);
-  if (!row || !bcrypt.compareSync(password, row.password)) return res.status(401).json({ detail:"Credenziali errate" });
-  if (!row.active) return res.status(403).json({ detail:"Account disattivato" });
-  const token = makeToken({ id: row.id, role: row.role });
-  db.prepare("UPDATE users SET last_login_at=? WHERE id=?").run(new Date().toISOString(), row.id);
-  res.json({ token });
-});
-
-app.get("/api/me", (req, res) => {
-  const u = getAuthUser(req,res); if(!u) return;
-  res.json(u);
-});
-
-// ===== Periodi & Carrelli =====
-app.get("/api/periods", (_req, res) => {
-  res.json(db.prepare("SELECT id,ord,name,start,end FROM periods ORDER BY ord").all());
-});
-app.get("/api/notebooks", (_req, res) => {
-  res.json(db.prepare("SELECT id,name,active FROM notebooks WHERE active=1 ORDER BY name").all());
-});
-
-// ===== Admin carrelli =====
-app.get("/api/admin/notebooks", (req, res) => {
-  const u=getAuthUser(req,res); if(!u) return; if(u.role!=="admin") return res.status(403).json({detail:"Solo admin"});
-  res.json(db.prepare("SELECT id,name,active FROM notebooks ORDER BY id").all());
-});
-app.post("/api/admin/notebooks", (req, res) => {
-  const u=getAuthUser(req,res); if(!u) return; if(u.role!=="admin") return res.status(403).json({detail:"Solo admin"});
-  const { name, active=true } = req.body||{};
-  const clean=String(name||"").trim(); if(!clean) return res.status(400).json({detail:"Nome obbligatorio"});
-  try{
-    const info=db.prepare("INSERT INTO notebooks (name,active) VALUES (?,?)").run(clean, active?1:0);
-    res.status(201).json(db.prepare("SELECT id,name,active FROM notebooks WHERE id=?").get(info.lastInsertRowid));
-  }catch(e){ if(String(e.message).toUpperCase().includes("UNIQUE")) return res.status(409).json({detail:"Nome già presente"}); throw e; }
-});
-app.post("/api/admin/notebooks/bulk", (req, res) => {
-  const u=getAuthUser(req,res); if(!u) return; if(u.role!=="admin") return res.status(403).json({detail:"Solo admin"});
-  const { base="Carrello", startFrom=1, count=1 } = req.body||{};
-  const c = Math.max(1, Math.min(500, Number(count)||1));
-  const s = Math.max(1, Number(startFrom)||1);
-  const ins = db.prepare("INSERT OR IGNORE INTO notebooks (name,active) VALUES (?,1)");
-  const tx = db.transaction(()=>{
-    for(let i=0;i<c;i++){ ins.run(`${String(base).trim()} ${s+i}`); }
+// ---------- Mailer ----------
+let mailer = null;
+if (SMTP_HOST && SMTP_USER && SMTP_PASS) {
+  mailer = nodemailer.createTransport({
+    host: SMTP_HOST,
+    port: Number(SMTP_PORT || 587),
+    secure: SMTP_SECURE === "true",
+    auth: { user: SMTP_USER, pass: SMTP_PASS },
   });
-  tx();
-  res.json({ ok:true, created:c });
-});
-app.put("/api/admin/notebooks/:id", (req, res) => {
-  const u=getAuthUser(req,res); if(!u) return; if(u.role!=="admin") return res.status(403).json({detail:"Solo admin"});
-  const id=Number(req.params.id), {name,active}=req.body||{};
-  const exists=db.prepare("SELECT id FROM notebooks WHERE id=?").get(id); if(!exists) return res.status(404).json({detail:"Carrello non trovato"});
-  const fields=[], vals=[];
-  if (typeof name==="string" && name.trim()){ fields.push("name=?"); vals.push(name.trim()); }
-  if (typeof active==="boolean"){ fields.push("active=?"); vals.push(active?1:0); }
-  if (!fields.length) return res.status(400).json({detail:"Nessun campo da aggiornare"});
-  db.prepare(`UPDATE notebooks SET ${fields.join(", ")} WHERE id=?`).run(...vals, id);
-  res.json(db.prepare("SELECT id,name,active FROM notebooks WHERE id=?").get(id));
-});
-app.delete("/api/admin/notebooks/:id", (req, res) => {
-  const u=getAuthUser(req,res); if(!u) return; if(u.role!=="admin") return res.status(403).json({detail:"Solo admin"});
-  const id=Number(req.params.id);
-  const has = db.prepare("SELECT 1 FROM bookings WHERE notebookId=? LIMIT 1").get(id);
-  if (has) return res.status(409).json({ detail:"Impossibile eliminare: esistono prenotazioni per questo carrello" });
-  const info=db.prepare("DELETE FROM notebooks WHERE id=?").run(id);
-  if(!info.changes) return res.status(404).json({detail:"Carrello non trovato"});
-  res.json({ok:true});
-});
+}
 
-// ===== Disponibilità =====
-app.get("/api/availability", (req, res) => {
-  const { date, time, periodId } = req.query||{};
-  if (!date) return res.status(400).json({ detail:"Parametro 'date' obbligatorio (YYYY-MM-DD)" });
-  if (!time && !periodId) return res.status(400).json({ detail:"Indicare 'time' (HH:MM) oppure 'periodId'" });
-  if (time && !hhmmOk(time)) return res.status(400).json({ detail:"time non valido (HH:MM)" });
-  const rows = db.prepare(`
-    SELECT n.id, n.name, n.active,
-      CASE WHEN EXISTS (
-        SELECT 1 FROM bookings b
-        WHERE b.notebookId = n.id AND b.date = ?
-          AND ((? IS NOT NULL AND b.time = ?) OR (? IS NOT NULL AND b.periodId = ?))
-      ) THEN 1 ELSE 0 END AS booked
-    FROM notebooks n
-    WHERE n.active=1
-    ORDER BY n.name
-  `).all(date, time||null, time||null, periodId||null, periodId||null);
-  res.json(rows);
-});
-
-// ===== Prenotazioni =====
-app.get("/api/bookings", (req, res) => {
-  const u = getAuthUser(req,res); if(!u) return;
-  const rows = db.prepare(`
-    SELECT b.*, p.name AS period_name, p.start AS period_start, p.end AS period_end
-    FROM bookings b
-    LEFT JOIN periods p ON p.id=b.periodId
-    WHERE b.userId=?
-    ORDER BY b.date DESC, COALESCE(p.ord,999), b.time
-  `).all(u.id);
-  res.json(rows);
-});
-app.get("/api/admin/bookings", (req, res) => {
-  const u=getAuthUser(req,res); if(!u) return; if(u.role!=="admin") return res.status(403).json({detail:"Solo admin"});
-  const rows = db.prepare(`
-    SELECT b.*, u.email AS user_email, u.first_name AS u_first, u.last_name AS u_last,
-           n.name AS notebook_name, p.name AS period_name, p.start AS period_start, p.end AS period_end
-    FROM bookings b
-    JOIN users u ON u.id=b.userId
-    JOIN notebooks n ON n.id=b.notebookId
-    LEFT JOIN periods p ON p.id=b.periodId
-    ORDER BY b.date DESC, COALESCE(p.ord,999), b.time
-  `).all();
-  res.json(rows);
-});
-app.post("/api/bookings", async (req, res) => {
-  const u = getAuthUser(req,res); if(!u) return;
-  const { notebookId, date, time, periodId, teacherFirst, teacherLast, class_name=null, room=null } = req.body||{};
-  if (!notebookId || !date) return res.status(400).json({ detail:"notebookId e date obbligatori" });
-  if (!time && !periodId) return res.status(400).json({ detail:"Indicare 'time' (HH:MM) oppure 'periodId'" });
-  if (time && !hhmmOk(time)) return res.status(400).json({ detail:"time non valido (HH:MM)" });
-  if (!nameOk(teacherFirst||"") || !nameOk(teacherLast||"")) return res.status(400).json({ detail:"Nome e cognome docente non validi" });
-
-  const nb = getNotebookById(Number(notebookId)); if(!nb) return res.status(400).json({detail:"Carrello inesistente"});
-  if (!nb.active) return res.status(400).json({detail:"Carrello non attivo"});
-
-  let period = null, periodIdToSave = null, timeToSave = null;
-  if (periodId) { period = getPeriodById(Number(periodId)); if(!period) return res.status(400).json({detail:"Periodo inesistente"}); periodIdToSave = period.id; }
-  else { timeToSave = time; }
-
-  try {
-    const info = db.prepare(`
-      INSERT INTO bookings (userId, notebookId, date, time, periodId, teacher_first, teacher_last, class_name, room)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      u.id, notebookId, date, timeToSave, periodIdToSave,
-      String(teacherFirst).trim(), String(teacherLast).trim(), class_name||null, room||null
+// ---------- Schema & seed ----------
+async function initDb() {
+  // tabelle
+  await qi(`
+    CREATE TABLE IF NOT EXISTS users (
+      id SERIAL PRIMARY KEY,
+      email TEXT UNIQUE NOT NULL,
+      password TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'user'
     );
+  `);
+  await qi(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email);`);
 
-    const booking = { id:info.lastInsertRowid, notebookId, date, time:timeToSave, periodId:periodIdToSave,
-                      teacher_first:String(teacherFirst).trim(), teacher_last:String(teacherLast).trim(), class_name, room };
+  await qi(`
+    CREATE TABLE IF NOT EXISTS notebooks (
+      id SERIAL PRIMARY KEY,
+      name TEXT UNIQUE NOT NULL,
+      active BOOLEAN NOT NULL DEFAULT TRUE
+    );
+  `);
 
-    try { const user = getUserById(u.id); const to = user?.email || null;
-      if (to) await sendBookingMail({ type:"confirm", to, booking, notebook: nb, period });
-    } catch(e){ console.warn("⚠️ email conferma:", e.message); }
+  await qi(`
+    CREATE TABLE IF NOT EXISTS periods (
+      id SERIAL PRIMARY KEY,
+      ord INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      start_time TEXT, -- "HH:MM"
+      end_time TEXT    -- "HH:MM"
+    );
+  `);
 
-    res.status(201).json({ ok:true, id: booking.id });
-  } catch(e){
-    if (String(e.message).toUpperCase().includes("UNIQUE")) return res.status(409).json({ detail:"Slot già prenotato per questo carrello" });
-    throw e;
+  await qi(`
+    CREATE TABLE IF NOT EXISTS teachers (
+      id SERIAL PRIMARY KEY,
+      first_name TEXT,
+      last_name TEXT,
+      teacher_code TEXT UNIQUE,
+      email TEXT,
+      role TEXT NOT NULL DEFAULT 'user',
+      active BOOLEAN NOT NULL DEFAULT TRUE
+    );
+  `);
+  await qi(`CREATE UNIQUE INDEX IF NOT EXISTS idx_teachers_code ON teachers(teacher_code);`);
+
+  await qi(`
+    CREATE TABLE IF NOT EXISTS bookings (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      notebook_id INTEGER NOT NULL REFERENCES notebooks(id) ON DELETE CASCADE,
+      date TEXT NOT NULL,            -- YYYY-MM-DD
+      time TEXT,                     -- HH:MM (opzionale se si usa period_id)
+      period_id INTEGER REFERENCES periods(id) ON DELETE SET NULL,
+      teacher_first TEXT,
+      teacher_last TEXT,
+      class_name TEXT,
+      room TEXT
+    );
+  `);
+  await qi(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_slot_period
+    ON bookings (notebook_id, date, COALESCE(period_id, -1), COALESCE(time, ''));
+  `);
+
+  // reset opzionale
+  if (RESET_DB === "1") {
+    await qi(`TRUNCATE TABLE bookings RESTART IDENTITY CASCADE;`);
+    await qi(`TRUNCATE TABLE notebooks RESTART IDENTITY CASCADE;`);
+    await qi(`TRUNCATE TABLE teachers RESTART IDENTITY CASCADE;`);
+    await qi(`TRUNCATE TABLE periods RESTART IDENTITY CASCADE;`);
+    console.log("🧹 DB pulito (RESET_DB=1)");
+  }
+
+  // seed admin
+  const u = await q(`SELECT id FROM users WHERE email=$1`, [ADMIN_EMAIL]);
+  if (u.length === 0) {
+    const hash = await bcrypt.hash(ADMIN_PASSWORD, 10);
+    await qi(
+      `INSERT INTO users (email, password, role) VALUES ($1,$2,'admin')`,
+      [ADMIN_EMAIL, hash]
+    );
+    console.log(`✅ Admin creato: ${ADMIN_EMAIL} / ${ADMIN_PASSWORD}`);
+  }
+
+  // seed notebooks
+  const nbCount = (await q(`SELECT COUNT(*)::int AS c FROM notebooks`))[0].c;
+  if (nbCount === 0) {
+    const seed = ["Carrello 1", "Carrello 2", "Carrello 3", "Carrello 4"];
+    for (const name of seed) {
+      await qi(`INSERT INTO notebooks(name, active) VALUES ($1, TRUE) ON CONFLICT DO NOTHING;`, [name]);
+    }
+    console.log("🌱 Seed notebooks inseriti");
+  }
+
+  // seed periods (se vuoto) – 6 ore tipiche
+  const pCount = (await q(`SELECT COUNT(*)::int AS c FROM periods`))[0].c;
+  if (pCount === 0) {
+    const rows = [
+      [1, "1ª ora", "08:00", "09:00"],
+      [2, "2ª ora", "09:00", "10:00"],
+      [3, "3ª ora", "10:00", "11:00"],
+      [4, "4ª ora", "11:00", "12:00"],
+      [5, "5ª ora", "12:00", "13:00"],
+      [6, "6ª ora", "13:00", "14:00"],
+    ];
+    for (const [ord, name, s, e] of rows) {
+      await qi(
+        `INSERT INTO periods(ord, name, start_time, end_time) VALUES ($1,$2,$3,$4)`,
+        [ord, name, s, e]
+      );
+    }
+    console.log("🕘 Periodi inseriti");
+  }
+}
+
+// ---------- Helpers ----------
+function makeToken(payload, minutes = Number(JWT_EXPIRE_MIN || 60)) {
+  return jwt.sign(
+    { ...payload, exp: Math.floor(Date.now() / 1000) + minutes * 60 },
+    JWT_SECRET
+  );
+}
+async function auth(req, res, next) {
+  const hdr = (req.headers.authorization || "").trim();
+  if (!hdr.startsWith("Bearer ")) return res.status(401).json({ detail: "Token mancante" });
+  const token = hdr.slice(7);
+  try {
+    const data = jwt.verify(token, JWT_SECRET);
+    req.user = data;
+    next();
+  } catch {
+    return res.status(401).json({ detail: "Token non valido" });
+  }
+}
+function adminOnly(req, res, next) {
+  if (req.user?.role === "admin") return next();
+  return res.status(403).json({ detail: "Solo admin" });
+}
+
+// ---------- ROUTES ----------
+app.get("/api/health", (req, res) => res.json({ ok: true }));
+
+// --- Auth (email/password) ---
+app.post("/api/register", async (req, res) => {
+  try {
+    const { email, password } = req.body || {};
+    if (!email || !password || password.length < 6) {
+      return res.status(400).json({ detail: "Parametri mancanti o password corta" });
+    }
+    const exist = await q(`SELECT id FROM users WHERE email=$1`, [email]);
+    if (exist.length) return res.status(409).json({ detail: "Email già registrata" });
+    const hash = await bcrypt.hash(password, 10);
+    const r = await qi(
+      `INSERT INTO users(email,password,role) VALUES ($1,$2,'user') RETURNING id, email, role`,
+      [email, hash]
+    );
+    const u = r.rows[0];
+    const token = makeToken({ id: u.id, email: u.email, role: u.role });
+    res.json({ token, user: u });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ detail: "Errore registrazione" });
   }
 });
-app.delete("/api/bookings/:id", async (req, res) => {
-  const u=getAuthUser(req,res); if(!u) return;
-  const id=Number(req.params.id);
-  const row = db.prepare("SELECT * FROM bookings WHERE id=?").get(id);
-  if (!row) return res.status(404).json({ detail:"Prenotazione non trovata" });
-  if (u.role!=="admin" && row.userId!==u.id) return res.status(403).json({ detail:"Non autorizzato" });
-  db.prepare("DELETE FROM bookings WHERE id=?").run(id);
 
+app.post("/api/login", async (req, res) => {
   try {
-    const user = getUserById(row.userId);
-    const nb = getNotebookById(row.notebookId);
-    const period = row.periodId ? getPeriodById(row.periodId) : null;
-    if (user?.email) await sendBookingMail({ type:"cancel", to:user.email, booking: row, notebook: nb, period });
-  } catch(e){ console.warn("⚠️ email cancellazione:", e.message); }
-
-  res.json({ ok:true });
+    const { email, password } = req.body || {};
+    const r = await q(`SELECT id,email,password,role FROM users WHERE email=$1`, [email]);
+    if (r.length === 0) return res.status(401).json({ detail: "Credenziali errate" });
+    const ok = await bcrypt.compare(password || "", r[0].password);
+    if (!ok) return res.status(401).json({ detail: "Credenziali errate" });
+    const token = makeToken({ id: r[0].id, email: r[0].email, role: r[0].role });
+    res.json({ token });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ detail: "Errore login" });
+  }
 });
 
-// ===== Admin: Docenti =====
-app.get("/api/admin/teachers", (req, res) => {
-  const u=getAuthUser(req,res); if(!u) return; if(u.role!=="admin") return res.status(403).json({detail:"Solo admin"});
-  const rows = db.prepare(`
-    SELECT id, first_name, last_name, teacher_code, email, role, active, created_at, last_login_at
-    FROM users
-    WHERE role IN ('user','admin')
-    ORDER BY last_name, first_name
-  `).all();
+app.get("/api/me", auth, async (req, res) => {
+  // Se l'utente proviene da login docente, potremmo includere anche first/last
+  res.json({ id: req.user.id, email: req.user.email, role: req.user.role, first_name: req.user.first_name, last_name: req.user.last_name });
+});
+
+// --- Login Docente con codice ---
+app.post("/api/login-code", async (req, res) => {
+  try {
+    const { firstName, lastName, code } = req.body || {};
+    if (!code) return res.status(400).json({ detail: "Codice mancante" });
+    const r = await q(
+      `SELECT id, first_name, last_name, email, role, active FROM teachers WHERE teacher_code=$1`,
+      [code]
+    );
+    if (!r.length || r[0].active !== true) return res.status(401).json({ detail: "Docente non attivo o codice errato" });
+    // opzionale: verifica match nome/cognome se forniti
+    if (firstName && r[0].first_name && firstName.trim().toLowerCase() !== r[0].first_name.trim().toLowerCase()) {
+      return res.status(401).json({ detail: "Nome non corrisponde" });
+    }
+    if (lastName && r[0].last_name && lastName.trim().toLowerCase() !== r[0].last_name.trim().toLowerCase()) {
+      return res.status(401).json({ detail: "Cognome non corrisponde" });
+    }
+    const role = r[0].role === "admin" ? "admin" : "user";
+    // creiamo (o riutilizziamo) un utente "ombra" con email del docente (se presente) oppure fittizia
+    const email = r[0].email || `teacher_${r[0].id}@local`;
+    let u = await q(`SELECT id,email,role FROM users WHERE email=$1`, [email]);
+    if (!u.length) {
+      const hash = await bcrypt.hash(Math.random().toString(36).slice(2), 10);
+      await qi(`INSERT INTO users(email,password,role) VALUES ($1,$2,$3)`, [email, hash, role]);
+      u = await q(`SELECT id,email,role FROM users WHERE email=$1`, [email]);
+    } else {
+      // aggiorna eventuale ruolo admin
+      if (role !== u[0].role) await qi(`UPDATE users SET role=$2 WHERE id=$1`, [u[0].id, role]);
+    }
+    const token = makeToken({ id: u[0].id, email: u[0].email, role, first_name: r[0].first_name, last_name: r[0].last_name });
+    res.json({ token, first_name: r[0].first_name, last_name: r[0].last_name });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ detail: "Errore login docente" });
+  }
+});
+
+app.post("/api/login-code-only", async (req, res) => {
+  // stessa logica ma senza validazione nome/cognome
+  req.body.firstName = null; req.body.lastName = null;
+  return app._router.handle({ ...req, url: "/api/login-code", method: "POST" }, res, () => {});
+});
+
+// --- Password reset ---
+app.post("/api/password/request", async (req, res) => {
+  try {
+    const { email } = req.body || {};
+    const r = await q(`SELECT id,email FROM users WHERE email=$1`, [email]);
+    if (!r.length) return res.json({ ok: true }); // non rivelare
+    const token = makeToken({ type: "pwreset", uid: r[0].id, email: r[0].email }, 30); // 30 minuti
+    if (!mailer) return res.json({ ok: true, note: "Mailer non configurato" });
+    const url = `${APP_BASE_URL.replace(/\/$/,'')}/reset-password.html?token=${encodeURIComponent(token)}`;
+    await mailer.sendMail({
+      from: SMTP_FROM,
+      to: r[0].email,
+      subject: "Reset password",
+      text: `Per reimpostare la password apri: ${url}`,
+      html: `Per reimpostare la password <a href="${url}">clicca qui</a>.`,
+    });
+    res.json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ detail: "Errore richiesta reset" });
+  }
+});
+
+app.post("/api/password/reset", async (req, res) => {
+  try {
+    const { token, newPassword } = req.body || {};
+    if (!token || !newPassword || newPassword.length < 6) {
+      return res.status(400).json({ error: "Token o password non validi" });
+    }
+    let data;
+    try {
+      data = jwt.verify(token, JWT_SECRET);
+    } catch {
+      return res.status(400).json({ error: "Token non valido o scaduto" });
+    }
+    if (data.type !== "pwreset") return res.status(400).json({ error: "Token non valido" });
+    const hash = await bcrypt.hash(newPassword, 10);
+    await qi(`UPDATE users SET password=$2 WHERE id=$1`, [data.uid, hash]);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Errore reset password" });
+  }
+});
+
+// --- Notebooks (pubblico + admin) ---
+app.get("/api/notebooks", async (req, res) => {
+  try {
+    const rows = await q(`SELECT id,name,active FROM notebooks WHERE active=TRUE ORDER BY name`);
+    res.json(rows);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ detail: "Errore elenco notebooks" });
+  }
+});
+
+app.get("/api/admin/notebooks", auth, adminOnly, async (req, res) => {
+  const rows = await q(`SELECT id,name,active FROM notebooks ORDER BY id`);
   res.json(rows);
 });
-app.post("/api/admin/teachers", (req, res) => {
-  const u=getAuthUser(req,res); if(!u) return; if(u.role!=="admin") return res.status(403).json({detail:"Solo admin"});
-  const { first_name, last_name, teacher_code, email=null, role="user", active=true } = req.body||{};
-  const nameOkLocal = s => typeof s==="string" && /^[A-Za-zÀ-ÖØ-öø-ÿ' -]{2,60}$/.test(String(s).trim());
-  if (!nameOkLocal(first_name||"") || !nameOkLocal(last_name||"") || !teacher_code) return res.status(400).json({detail:"Nome, cognome e codice obbligatori"});
-  try{
-    const now=new Date().toISOString();
-    const info = db.prepare(`INSERT INTO users (first_name,last_name,teacher_code,email,role,active,created_at)
-                             VALUES (?,?,?,?,?,?,?)`)
-                   .run(String(first_name).trim(), String(last_name).trim(), String(teacher_code).trim(),
-                        email||null, role==="admin"?"admin":"user", active?1:0, now);
-    res.status(201).json(db.prepare("SELECT * FROM users WHERE id=?").get(info.lastInsertRowid));
-  }catch(e){
-    if (String(e.message).toUpperCase().includes("UNIQUE")) return res.status(409).json({detail:"Codice docente o email già presente"});
-    throw e;
+
+app.post("/api/admin/notebooks", auth, adminOnly, async (req, res) => {
+  try {
+    const { name, active = true } = req.body || {};
+    if (!name || !name.trim()) return res.status(400).json({ detail: "Nome obbligatorio" });
+    const r = await qi(
+      `INSERT INTO notebooks(name,active) VALUES ($1,$2) RETURNING id,name,active`,
+      [name.trim(), !!active]
+    );
+    res.status(201).json(r.rows[0]);
+  } catch (e) {
+    if (String(e.message).toLowerCase().includes("duplicate key")) {
+      return res.status(409).json({ detail: "Nome già presente" });
+    }
+    console.error(e);
+    res.status(500).json({ detail: "Errore creazione notebook" });
   }
 });
-app.put("/api/admin/teachers/:id", (req, res) => {
-  const u=getAuthUser(req,res); if(!u) return; if(u.role!=="admin") return res.status(403).json({detail:"Solo admin"});
-  const id=Number(req.params.id);
-  const { first_name, last_name, teacher_code, email, role, active } = req.body||{};
-  const exists = db.prepare("SELECT id FROM users WHERE id=?").get(id);
-  if(!exists) return res.status(404).json({detail:"Docente non trovato"});
-  const fields=[], vals=[];
-  if (typeof first_name==="string" && first_name.trim()){ fields.push("first_name=?"); vals.push(first_name.trim()); }
-  if (typeof last_name==="string"  && last_name.trim()) { fields.push("last_name=?");  vals.push(last_name.trim()); }
-  if (typeof teacher_code==="string" && teacher_code.trim()){ fields.push("teacher_code=?"); vals.push(teacher_code.trim()); }
-  if (typeof email==="string" && email.trim()){ fields.push("email=?"); vals.push(email.trim()); }
-  if (role && (role==="user"||role==="admin")){ fields.push("role=?"); vals.push(role); }
-  if (typeof active==="boolean"){ fields.push("active=?"); vals.push(active?1:0); }
-  if (!fields.length) return res.status(400).json({detail:"Nessun campo da aggiornare"});
-  try{
-    db.prepare(`UPDATE users SET ${fields.join(", ")} WHERE id=?`).run(...vals, id);
-  }catch(e){
-    if (String(e.message).toUpperCase().includes("UNIQUE")) return res.status(409).json({detail:"Codice docente o email già presente"});
-    throw e;
+
+app.put("/api/admin/notebooks/:id", auth, adminOnly, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const { name, active } = req.body || {};
+    const sets = [];
+    const vals = [];
+    if (name != null && String(name).trim()) { sets.push(`name=$${sets.length+1}`); vals.push(String(name).trim()); }
+    if (active != null) { sets.push(`active=$${sets.length+1}`); vals.push(!!active); }
+    if (!sets.length) return res.status(400).json({ detail: "Nessun campo da aggiornare" });
+    vals.push(id);
+    const r = await qi(`UPDATE notebooks SET ${sets.join(",")} WHERE id=$${vals.length} RETURNING id,name,active`, vals);
+    if (!r.rowCount) return res.status(404).json({ detail: "Notebook non trovato" });
+    res.json(r.rows[0]);
+  } catch (e) {
+    if (String(e.message).toLowerCase().includes("duplicate key")) {
+      return res.status(409).json({ detail: "Nome già presente" });
+    }
+    console.error(e);
+    res.status(500).json({ detail: "Errore aggiornamento" });
   }
-  res.json(db.prepare("SELECT * FROM users WHERE id=?").get(id));
 });
-app.delete("/api/admin/teachers/:id", (req, res) => {
-  const u=getAuthUser(req,res); if(!u) return; if(u.role!=="admin") return res.status(403).json({detail:"Solo admin"});
+
+app.delete("/api/admin/notebooks/:id", auth, adminOnly, async (req, res) => {
   const id = Number(req.params.id);
-  const has = db.prepare("SELECT 1 FROM bookings WHERE userId=? LIMIT 1").get(id);
-  if (has) return res.status(409).json({ detail:"Impossibile eliminare: il docente ha prenotazioni associate" });
-  const info = db.prepare("DELETE FROM users WHERE id=?").run(id);
-  if (!info.changes) return res.status(404).json({ detail:"Docente non trovato" });
-  res.json({ ok:true });
+  const r = await qi(`DELETE FROM notebooks WHERE id=$1`, [id]);
+  if (!r.rowCount) return res.status(404).json({ detail: "Notebook non trovato" });
+  res.json({ ok: true });
 });
-app.post("/api/admin/teachers/import", (req, res) => {
-  const u=getAuthUser(req,res); if(!u) return; if(u.role!=="admin") return res.status(403).json({detail:"Solo admin"});
-  const { csv } = req.body||{};
-  if (!csv || typeof csv!=="string") return res.status(400).json({detail:"CSV mancante"});
-  const linesRaw = csv.split(/\r?\n/).filter(l=>l.trim().length>0);
-  if (!linesRaw.length) return res.status(400).json({detail:"Nessuna riga trovata"});
 
-  const splitSmart = (line) => {
-    const s = line.replace(/(^"|"$)/g, "");
-    const sc = (s.match(/;/g)||[]).length, cc=(s.match(/,/g)||[]).length, tc=(s.match(/\t/g)||[]).length;
-    const sep = sc>=cc && sc>=tc ? ";" : (cc>=tc ? "," : "\t");
-    return s.split(sep).map(x=>x.trim().replace(/^"(.*)"$/,'$1'));
-  };
-
-  let i=0; if (/nome|cognome|codice/i.test(linesRaw[0])) i=1;
-
-  const ins = db.prepare(`INSERT INTO users (first_name,last_name,teacher_code,email,role,active,created_at)
-                          VALUES (?,?,?,?,?,?,?)`);
-  const upd = db.prepare(`UPDATE users SET first_name=?, last_name=?, email=?, role=?, active=? WHERE teacher_code=?`);
-  const now = new Date().toISOString();
-  let created=0, updated=0, skipped=0, errors=[];
-
-  const tx = db.transaction(()=>{
-    for (; i<linesRaw.length; i++){
-      const parts = splitSmart(linesRaw[i]);
-      const [fn, ln, code, email, role="user", active="1"] = parts;
-      if (!fn || !ln || !code){ skipped++; continue; }
-      const exists = db.prepare("SELECT id FROM users WHERE teacher_code=?").get(String(code).trim());
-      try{
-        if (!exists){
-          ins.run(String(fn).trim(), String(ln).trim(), String(code).trim(), (email||null)||null,
-                  (String(role).toLowerCase()==="admin"?"admin":"user"),
-                  (String(active)==="1"||active===1)?1:0, now);
-          created++;
-        } else {
-          upd.run(String(fn).trim(), String(ln).trim(), (email||null)||null,
-                  (String(role).toLowerCase()==="admin"?"admin":"user"),
-                  (String(active)==="1"||active===1)?1:0, String(code).trim());
-          updated++;
-        }
-      }catch(e){ errors.push(`${code||'(senza codice)'}: ${e.message}`); }
+app.post("/api/admin/notebooks/bulk", auth, adminOnly, async (req, res) => {
+  const { base = "Carrello", startFrom = 1, count = 1 } = req.body || {};
+  let created = 0, skipped = 0;
+  for (let i = 0; i < Number(count); i++) {
+    const name = `${base} ${Number(startFrom) + i}`;
+    try {
+      await qi(`INSERT INTO notebooks(name,active) VALUES ($1,TRUE)`, [name]);
+      created++;
+    } catch (e) {
+      skipped++;
     }
-  });
-  tx();
-
-  res.json({ ok:true, created, updated, skipped, errors });
+  }
+  res.json({ created, skipped });
 });
-app.post("/api/admin/teachers/bulk", (req, res) => {
-  const u=getAuthUser(req,res); if(!u) return; if(u.role!=="admin") return res.status(403).json({detail:"Solo admin"});
-  const { teachers } = req.body||{};
-  if (!Array.isArray(teachers)) return res.status(400).json({detail:"Array 'teachers' mancante"});
-  const ins = db.prepare(`INSERT INTO users (first_name,last_name,teacher_code,email,role,active,created_at)
-                          VALUES (?,?,?,?,?,?,?)`);
-  const upd = db.prepare(`UPDATE users SET first_name=?, last_name=?, email=?, role=?, active=? WHERE teacher_code=?`);
-  const now = new Date().toISOString();
-  let created=0, updated=0, skipped=0, errors=[];
-  const tx = db.transaction(()=>{
-    for (const t of teachers){
-      const fn=t.first_name||t.firstName, ln=t.last_name||t.lastName, code=t.teacher_code||t.code;
-      const email=(t.email||null), role=(t.role==="admin"?"admin":"user"), active=(t.active===false?0:1);
-      if (!fn || !ln || !code){ skipped++; continue; }
-      const exists = db.prepare("SELECT id FROM users WHERE teacher_code=?").get(String(code).trim());
-      try{
-        if (!exists){ ins.run(String(fn).trim(), String(ln).trim(), String(code).trim(), email, role, active, now); created++; }
-        else { upd.run(String(fn).trim(), String(ln).trim(), email, role, active, String(code).trim()); updated++; }
-      }catch(e){ errors.push(`${code||'(senza codice)'}: ${e.message}`); }
+
+// --- Periodi & Disponibilità ---
+app.get("/api/periods", async (req, res) => {
+  const rows = await q(`SELECT id, ord, name, start_time AS start, end_time AS end FROM periods ORDER BY ord`);
+  res.json(rows);
+});
+
+app.get("/api/availability", async (req, res) => {
+  const { date, periodId } = req.query;
+  if (!date || !periodId) return res.status(400).json({ detail: "Parametri mancanti" });
+  const notebooks = await q(`SELECT id, name FROM notebooks WHERE active=TRUE ORDER BY id`);
+  if (!notebooks.length) return res.json([]);
+  const bookedRows = await q(
+    `SELECT notebook_id FROM bookings WHERE date=$1 AND period_id=$2`,
+    [date, Number(periodId)]
+  );
+  const bookedSet = new Set(bookedRows.map(r => r.notebook_id));
+  const out = notebooks.map(n => ({ id: n.id, name: n.name, booked: bookedSet.has(n.id) }));
+  res.json(out);
+});
+
+// --- Prenotazioni (utente & admin) ---
+app.get("/api/bookings", auth, async (req, res) => {
+  const rows = await q(`
+    SELECT b.id, b.notebook_id AS "notebookId", n.name AS notebook_name,
+           b.date, b.time, b.period_id,
+           p.name AS period_name, p.start_time AS period_start, p.end_time AS period_end,
+           b.teacher_first AS teacher_first, b.teacher_last AS teacher_last,
+           b.class_name, b.room
+    FROM bookings b
+    JOIN notebooks n ON n.id=b.notebook_id
+    LEFT JOIN periods p ON p.id=b.period_id
+    WHERE b.user_id=$1
+    ORDER BY b.date DESC, COALESCE(p.ord, 99) DESC, b.id DESC
+  `, [req.user.id]);
+
+  // campi "retrocompatibilità" per app.js legacy
+  const mapped = rows.map(r => ({
+    ...r,
+    notebook: r.notebook_name || r.notebookId,
+    docente: [r.teacher_first, r.teacher_last].filter(Boolean).join(" "),
+    classe: r.class_name,
+    aula: r.room
+  }));
+
+  res.json(mapped);
+});
+
+app.post("/api/bookings", auth, async (req, res) => {
+  try {
+    const body = req.body || {};
+    const notebookId = Number(body.notebookId);
+    const date = body.date;
+    // supporto doppio schema: (periodId) oppure (time)
+    const periodId = body.periodId != null ? Number(body.periodId) : null;
+    const time = body.time || null;
+
+    const teacherFirst = body.teacherFirst || body.docente?.split(" ")[0] || null;
+    const teacherLast  = body.teacherLast  || body.docente?.split(" ").slice(1).join(" ") || null;
+    const className = body.class_name || body.classe || null;
+    const room = body.room || body.aula || null;
+
+    if (!notebookId || !date || (!periodId && !time)) {
+      return res.status(400).json({ detail: "Parametri mancanti" });
     }
+    // notebook attivo?
+    const nb = await q(`SELECT id, active FROM notebooks WHERE id=$1`, [notebookId]);
+    if (!nb.length || nb[0].active !== true) {
+      return res.status(400).json({ detail: "Notebook non attivo o inesistente" });
+    }
+    // inserimento con indice unico su (notebook_id,date,coalesce(period_id,-1),coalesce(time,''))
+    try {
+      const r = await qi(
+        `INSERT INTO bookings(user_id, notebook_id, date, time, period_id, teacher_first, teacher_last, class_name, room)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+         RETURNING id`,
+        [req.user.id, notebookId, date, time, periodId, teacherFirst, teacherLast, className, room]
+      );
+      res.status(201).json({ ok: true, id: r.rows[0].id });
+    } catch (e) {
+      if (String(e.message).toLowerCase().includes("duplicate key")) {
+        return res.status(409).json({ detail: "Slot già prenotato per questo notebook" });
+      }
+      throw e;
+    }
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ detail: "Errore creazione prenotazione" });
+  }
+});
+
+app.delete("/api/bookings/:id", auth, async (req, res) => {
+  const id = Number(req.params.id);
+  const r = await q(`SELECT id,user_id FROM bookings WHERE id=$1`, [id]);
+  if (!r.length) return res.status(404).json({ detail: "Prenotazione non trovata" });
+  if (req.user.role !== "admin" && r[0].user_id !== req.user.id) {
+    return res.status(403).json({ detail: "Non autorizzato" });
+  }
+  await qi(`DELETE FROM bookings WHERE id=$1`, [id]);
+  res.json({ ok: true });
+});
+
+app.get("/api/admin/bookings", auth, adminOnly, async (req, res) => {
+  const rows = await q(`
+    SELECT b.id, b.date, b.time, b.period_id, 
+           p.name AS period_name, p.start_time AS period_start, p.end_time AS period_end,
+           b.class_name, b.room, b.teacher_first, b.teacher_last,
+           u.email AS user_email, u.role AS user_role, u.id as user_id,
+           n.id AS "notebookId", n.name AS notebook_name
+    FROM bookings b
+    JOIN notebooks n ON n.id=b.notebook_id
+    LEFT JOIN users u ON u.id=b.user_id
+    LEFT JOIN periods p ON p.id=b.period_id
+    ORDER BY b.date DESC, COALESCE(p.ord, 99) DESC, b.id DESC
+  `);
+  // alias per UI
+  const mapped = rows.map(x => ({
+    ...x,
+    u_first: null, u_last: null, // placeholder compatibilità
+  }));
+  res.json(mapped);
+});
+
+// --- Docenti (admin) ---
+app.get("/api/admin/teachers", auth, adminOnly, async (req, res) => {
+  const rows = await q(`SELECT id, first_name, last_name, teacher_code, email, role, active FROM teachers ORDER BY id`);
+  res.json(rows);
+});
+
+app.post("/api/admin/teachers", auth, adminOnly, async (req, res) => {
+  try {
+    const { first_name, last_name, teacher_code, email = null, role = "user", active = true } = req.body || {};
+    if (!teacher_code) return res.status(400).json({ detail: "Codice docente obbligatorio" });
+    const r = await qi(
+      `INSERT INTO teachers(first_name,last_name,teacher_code,email,role,active)
+       VALUES ($1,$2,$3,$4,$5,$6)
+       RETURNING id, first_name, last_name, teacher_code, email, role, active`,
+      [first_name||null, last_name||null, teacher_code, email, role, !!active]
+    );
+    res.status(201).json(r.rows[0]);
+  } catch (e) {
+    if (String(e.message).toLowerCase().includes("duplicate key")) {
+      return res.status(409).json({ detail: "Codice docente già esistente" });
+    }
+    console.error(e);
+    res.status(500).json({ detail: "Errore creazione docente" });
+  }
+});
+
+app.put("/api/admin/teachers/:id", auth, adminOnly, async (req, res) => {
+  const id = Number(req.params.id);
+  const allowed = ["first_name","last_name","teacher_code","email","role","active"];
+  const sets = [], vals = [];
+  for (const k of allowed) {
+    if (k in (req.body||{})) { sets.push(`${k}=$${sets.length+1}`); vals.push(req.body[k]); }
+  }
+  if (!sets.length) return res.status(400).json({ detail: "Nessun campo da aggiornare" });
+  vals.push(id);
+  try {
+    const r = await qi(`UPDATE teachers SET ${sets.join(",")} WHERE id=$${vals.length} RETURNING id,first_name,last_name,teacher_code,email,role,active`, vals);
+    if (!r.rowCount) return res.status(404).json({ detail: "Docente non trovato" });
+    res.json(r.rows[0]);
+  } catch (e) {
+    if (String(e.message).toLowerCase().includes("duplicate key")) {
+      return res.status(409).json({ detail: "Codice docente già esistente" });
+    }
+    console.error(e);
+    res.status(500).json({ detail: "Errore aggiornamento docente" });
+  }
+});
+
+app.delete("/api/admin/teachers/:id", auth, adminOnly, async (req, res) => {
+  const id = Number(req.params.id);
+  const r = await qi(`DELETE FROM teachers WHERE id=$1`, [id]);
+  if (!r.rowCount) return res.status(404).json({ detail: "Docente non trovato" });
+  res.json({ ok: true });
+});
+
+// Import CSV: "Nome;Cognome;Codice;Email;Ruolo;Attivo(1/0)"
+app.post("/api/admin/teachers/import", auth, adminOnly, async (req, res) => {
+  const { csv = "" } = req.body || {};
+  const lines = String(csv).split(/\r?\n/).filter(x => x.trim());
+  let created = 0, updated = 0, skipped = 0, errors = [];
+  for (const line of lines) {
+    const parts = line.split(/;|,|\t/).map(s => s.trim());
+    if (parts.length < 3) { skipped++; continue; }
+    const [first_name, last_name, teacher_code, email=null, role="user", active="1"] = parts;
+    try {
+      const ex = await q(`SELECT id FROM teachers WHERE teacher_code=$1`, [teacher_code]);
+      if (ex.length) {
+        await qi(`UPDATE teachers SET first_name=$1,last_name=$2,email=$3,role=$4,active=$5 WHERE id=$6`,
+          [first_name||null,last_name||null,email||null,role, active==="1", ex[0].id]);
+        updated++;
+      } else {
+        await qi(`INSERT INTO teachers(first_name,last_name,teacher_code,email,role,active)
+                  VALUES ($1,$2,$3,$4,$5,$6)`,
+          [first_name||null,last_name||null,teacher_code,email||null,role,active==="1"]);
+        created++;
+      }
+    } catch (e) {
+      errors.push({ line, error: e.message });
+    }
+  }
+  res.json({ created, updated, skipped, errors });
+});
+
+app.post("/api/admin/teachers/bulk", auth, adminOnly, async (req, res) => {
+  const { teachers = [] } = req.body || {};
+  let created = 0, updated = 0, skipped = 0, errors = [];
+  for (const t of teachers) {
+    try {
+      if (!t.teacher_code) { skipped++; continue; }
+      const ex = await q(`SELECT id FROM teachers WHERE teacher_code=$1`, [t.teacher_code]);
+      if (ex.length) {
+        await qi(`UPDATE teachers SET first_name=$1,last_name=$2,email=$3,role=$4,active=$5 WHERE id=$6`,
+          [t.first_name||null,t.last_name||null,t.email||null,t.role||"user", !!t.active, ex[0].id]);
+        updated++;
+      } else {
+        await qi(`INSERT INTO teachers(first_name,last_name,teacher_code,email,role,active)
+                  VALUES ($1,$2,$3,$4,$5,$6)`,
+          [t.first_name||null,t.last_name||null,t.teacher_code,t.email||null,t.role||"user", !!t.active]);
+        created++;
+      }
+    } catch (e) {
+      errors.push({ t, error: e.message });
+    }
+  }
+  res.json({ created, updated, skipped, errors });
+});
+
+// ---------- Static (serve frontend) ----------
+app.use(express.static(path.join(__dirname, "."))); // index.html, app.js, reset-password.html
+app.get("*", (req, res) => {
+  res.sendFile(path.join(__dirname, "index.html"));
+});
+
+// ---------- Start ----------
+initDb()
+  .then(() => {
+    app.listen(PORT, () => console.log(`🚀 Server pronto su :${PORT}`));
+  })
+  .catch((e) => {
+    console.error("Init DB fallita:", e);
+    process.exit(1);
   });
-  tx();
-  res.json({ ok:true, created, updated, skipped, errors });
-});
-
-// Test mail
-app.post("/api/test-email", async (req, res) => {
-  const { to } = req.body||{};
-  const mailer = getMailer(); if(!mailer) return res.status(400).json({detail:"SMTP non configurato"});
-  try{ await mailer.verify(); await mailer.sendMail({from:FROM,to,subject:"Test SMTP",html:"<b>OK</b>"}); res.json({ok:true}); }
-  catch(e){ res.status(500).json({detail:e.message}); }
-});
-
-app.listen(PORT, () => console.log(`🚀 Server pronto su http://localhost:${PORT}`));

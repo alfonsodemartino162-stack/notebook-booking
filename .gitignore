@@ -4,5 +4,6 @@ data/
 *.db-wal
 *.db-shm
 .env
-*.exe
+*.log
 *.zip
+.DS_Store

@@ -1,24 +1,22 @@
 {
   "name": "notebook-booking",
   "version": "1.0.0",
-  "private": true,
-  "engines": {
-    "node": "20.x"
-  },
+  "description": "Prenotazione carrelli notebook/chromebook - IIS Nino Bixio",
+  "main": "server.cjs",
   "scripts": {
     "start": "node server.cjs",
     "dev": "nodemon server.cjs"
   },
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
     "bcryptjs": "^2.4.3",
-    "better-sqlite3": "^9.6.0",
     "cors": "^2.8.5",
-    "dotenv": "^16.6.1",
+    "dotenv": "^16.4.5",
     "express": "^4.21.2",
     "jsonwebtoken": "^9.0.2",
-    "nodemailer": "^7.0.9"
-  },
-  "devDependencies": {
-    "nodemon": "^3.1.10"
+    "nodemailer": "^6.9.14",
+    "pg": "^8.12.0"
   }
 }

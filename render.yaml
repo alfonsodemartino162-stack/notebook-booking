@@ -2,11 +2,41 @@
   - type: web
     name: notebook-booking
     env: node
-    plan: free
+    region: frankfurt
+    plan: starter
     buildCommand: npm install
     startCommand: npm start
+    autoDeploy: true
     envVars:
-      - key: NODE_VERSION
-        value: 20.x
-      - key: NPM_CONFIG_BUILD_FROM_SOURCE
-        value: "true"
+      - key: APP_BASE_URL
+        value: https://notebook-booking.onrender.com
+      - key: PORT
+        value: 10000
+      - key: JWT_SECRET
+        sync: false
+      - key: JWT_EXPIRE_MIN
+        value: "60"
+      - key: ADMIN_EMAIL
+        value: admin@bixio.local
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: RESET_DB
+        value: "0"
+      - key: TZ
+        value: Europe/Rome
+      - key: DATABASE_URL
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: "2525"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: SMTP_SECURE
+        value: "false"
+      - key: SMTP_FROM
+        value: "Prenotazioni <noreply@scuola.test>"
+      - key: SMTP_DEBUG
+        value: "0"
