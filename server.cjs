@@ -482,7 +482,12 @@ app.post("/api/bookings", auth, async (req, res) => {
     if (!notebookId || !date || (!periodId && !time)) {
       return res.status(400).json({ detail: "Parametri mancanti" });
     }
-    // notebook attivo?
+        // 👉 OBBLIGATORI: classe + aula
+    if (!className || !room) {
+      return res.status(400).json({ detail: "Classe e aula sono obbligatorie" });
+    }
+
+	// notebook attivo?
     const nb = await q(`SELECT id, active FROM notebooks WHERE id=$1`, [notebookId]);
     if (!nb.length || nb[0].active !== true) {
       return res.status(400).json({ detail: "Notebook non attivo o inesistente" });

@@ -133,7 +133,7 @@ kbd{background:#f1f5f9;border:1px solid var(--line);border-bottom-color:#cbd5e1;
     <section class="card span-12" id="adminCarrelli" style="display:none">
       <h3 style="margin:0 0 8px">Gestione carrelli (Admin)</h3>
       <div class="row" style="gap:8px">
-        <input id="newCartName" placeholder="Nome carrello (es. Carrello 5)" style="min-width:260px">
+        <input id="newCartName" placeholder="Nome f (es. Carrello 5)" style="min-width:260px">
         <label><input id="newCartActive" type="checkbox" checked> Attivo</label>
         <button class="btn btn-success btn-sm" id="btnAddCart">Aggiungi carrello</button>
         <input id="bulkBase" placeholder="Base es. Carrello" style="width:160px" value="Carrello">
@@ -234,7 +234,7 @@ function renderUserBar(){
 async function loadCarts(){
   try{
     cartsCache=await api('/api/notebooks');
-    b_cart.innerHTML='<option value="">— Seleziona carrello —</option>'+cartsCache.map(c=>`<option value="${c.id}">#${c.id} – ${escapeHtml(c.name)}</option>`).join('');
+    b_cart.innerHTML='<option value="">— Seleziona carrello —</option>'+cartsCache.map(c=>`<option value="${c.id}">${c.id} – ${escapeHtml(c.name)}</option>`).join('');
   }catch{ cartsCache=[]; b_cart.innerHTML='<option value="">— Nessun carrello attivo —</option>'; }
 }
 async function loadPeriods(){
@@ -311,29 +311,45 @@ btnLoginAdmin.onclick = async ()=>{
 };
 
 // Prenotazioni (utente)
+// Prenotazioni (utente)
 btnBook.onclick = async ()=>{
   if(!token) return showToast('Login richiesto','','warn');
   const date=b_date.value||null; const cartId=b_cart.value?Number(b_cart.value):null;
   if(!date) return showToast('Data mancante','','warn');
   if(!cartId) return showToast('Carrello non selezionato','','warn');
+
+  // 👉 OBBLIGATORI: classe + aula
+  const classVal = (b_class.value||'').trim();
+  const roomVal  = (b_room.value||'').trim();
+  if(!classVal) return showToast('Inserisci la classe','','warn');
+  if(!roomVal)  return showToast('Inserisci l’aula','','warn');
+
   const checks=[...document.querySelectorAll('.pcheck')].filter(x=>x.checked && !x.disabled);
   if(!checks.length) return showToast('Seleziona almeno un periodo','','warn');
 
   const payloadBase = {
     notebookId:cartId, date, time:null,
     teacherFirst:b_teacherFirst.value, teacherLast:b_teacherLast.value,
-    class_name:b_class.value||null, room:b_room.value||null
+    class_name: classVal,               // ← obbligatori
+    room:       roomVal                 // ← obbligatori
   };
   let ok=0, fail=0, msg='';
   for(const cb of checks){
-    try{ await api('/api/bookings',{method:'POST',headers:{'Content-Type':'application/json',...auth()},body:JSON.stringify({...payloadBase, periodId:Number(cb.value)})}); ok++; }
-    catch(e){ fail++; msg=e.detail||msg; }
+    try{
+      await api('/api/bookings',{
+        method:'POST',
+        headers:{'Content-Type':'application/json',...auth()},
+        body:JSON.stringify({...payloadBase, periodId:Number(cb.value)})
+      });
+      ok++;
+    }catch(e){ fail++; msg=e.detail||msg; }
   }
   if(ok && !fail) showToast('Prenotazione completata',`Create ${ok} prenotazioni`);
   else if(ok && fail) showToast('Parziale',`OK:${ok} | Errori:${fail} ${msg?'- '+msg:''}`,'warn');
   else showToast('Nessuna prenotazione', msg||'','warn');
   await Promise.all([btnMy.click(), refreshDisabledPeriods()]);
 };
+
 
 // Le mie prenotazioni
 btnMy.onclick = async ()=>{
