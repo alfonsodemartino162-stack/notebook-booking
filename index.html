@@ -71,7 +71,7 @@ kbd{background:#f1f5f9;border:1px solid var(--line);border-bottom-color:#cbd5e1;
       <span class="dot"></span>
       <div>
         <h1>⚓Prenotazione Carrelli Notebook/Chromebook IIS "NINO BIXIO" Piano di Sorrento⚓</h1>
-        <div class="subtitle"> con pochi click prenota i tuoi device by 
+        <div class="subtitle"> con pochi click prenota i tuoi devices by 
   <span style="font-weight: bold; color: #007bff;">Alfonso De Martino</span></div>
       </div>
     </div>
@@ -233,9 +233,13 @@ function renderUserBar(){
 // Carrelli & Periodi
 async function loadCarts(){
   try{
-    cartsCache=await api('/api/notebooks');
-    b_cart.innerHTML='<option value="">— Seleziona carrello —</option>'+cartsCache.map(c=>`<option value="${c.id}">#${c.id} – ${escapeHtml(c.name)}</option>`).join('');
-  }catch{ cartsCache=[]; b_cart.innerHTML='<option value="">— Nessun carrello attivo —</option>'; }
+    cartsCache = await api('/api/notebooks');
+b_cart.innerHTML = '<option value="">— Seleziona carrello —</option>' +
+  cartsCache.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
+}catch{
+  cartsCache = [];
+  b_cart.innerHTML = '<option value="">— Nessun carrello attivo —</option>';
+}
 }
 async function loadPeriods(){
   try{ periodsCache=await api('/api/periods'); renderPeriods([]); }
