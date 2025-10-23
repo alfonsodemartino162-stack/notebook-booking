@@ -236,7 +236,10 @@ async function loadCarts(){
    cartsCache = await api('/api/notebooks');
 b_cart.innerHTML = '<option value="">— Seleziona carrello —</option>' +
   cartsCache.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
-  }catch{ cartsCache=[]; b_cart.innerHTML='<option value="">— Nessun carrello attivo —</option>'; }
+  }catch{ 
+  cartsCache=[];
+  b_cart.innerHTML='<option value="">— Nessun carrello attivo —</option>';
+  }
 }
 async function loadPeriods(){
   try{ periodsCache=await api('/api/periods'); renderPeriods([]); }
