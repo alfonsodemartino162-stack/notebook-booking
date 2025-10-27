@@ -3,111 +3,109 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Notebook/Carrelli Booking</title>
+  <title>Notebook / Carrelli - Prenotazioni</title>
   <link rel="icon" href="data:," />
   <style>
-    :root { color-scheme: light dark; --gap: 12px; --pad: 14px; --radius: 10px; --muted: #999; }
-    * { box-sizing: border-box; }
-    body { margin: 0; font-family: system-ui, Segoe UI, Roboto, Helvetica, Arial, sans-serif; line-height: 1.35; }
-    header { padding: var(--pad); border-bottom: 1px solid #ddd2; display:flex; align-items:center; gap: var(--gap); flex-wrap: wrap; }
-    header h1 { font-size: 18px; margin: 0; }
-    header .spacer { flex: 1; }
-    header button, header a { margin-left: 6px; }
-    main { max-width: 1100px; margin: 0 auto; padding: var(--pad); display: grid; gap: var(--gap); }
-    section { border: 1px solid #ddd3; border-radius: var(--radius); padding: var(--pad); }
-    h2 { font-size: 16px; margin: 0 0 8px; }
-    form .row { display: grid; grid-template-columns: 160px 1fr; gap: 8px; margin-bottom: 8px; align-items: center; }
-    input, select, textarea { padding: 10px; border-radius: 8px; border: 1px solid #ccc; width: 100%; background: inherit; color: inherit; }
-    button { padding: 10px 14px; border-radius: 8px; border: 1px solid #8885; background: #0a84ff; color: #fff; cursor: pointer; }
-    button.secondary { background: transparent; color: inherit; }
-    .grid { display: grid; gap: 8px; }
-    .two { grid-template-columns: 1fr 1fr; }
-    .three { grid-template-columns: 1fr 1fr 1fr; }
-    .hide { display: none !important; }
-    table { width: 100%; border-collapse: collapse; font-size: 14px; }
-    th, td { padding: 8px; border-bottom: 1px solid #ddd3; text-align: left; }
-    .muted { color: var(--muted); }
-    .pill { display:inline-block; border:1px solid #ddd8; padding: 2px 8px; border-radius: 999px; font-size: 12px; }
-    .toolbar { display:flex; gap:8px; align-items:center; flex-wrap: wrap; }
+    body {
+      font-family: system-ui, sans-serif;
+      margin: 0;
+      padding: 0;
+      background: #f6f6f6;
+    }
+    header {
+      background: #0a84ff;
+      color: white;
+      padding: 12px 16px;
+      font-size: 18px;
+    }
+    main {
+      max-width: 800px;
+      margin: 0 auto;
+      background: white;
+      padding: 16px;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px #0001;
+    }
+    h2 {
+      margin-top: 0;
+    }
+    input, select, button {
+      padding: 10px;
+      font-size: 15px;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+    }
+    button {
+      background: #0a84ff;
+      color: white;
+      border: none;
+      cursor: pointer;
+    }
+    button.secondary {
+      background: #eee;
+      color: #333;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 12px;
+    }
+    th, td {
+      padding: 8px;
+      border-bottom: 1px solid #ddd;
+      text-align: left;
+    }
+    th {
+      background: #fafafa;
+    }
+    .muted {
+      color: #666;
+      font-size: 14px;
+    }
+    .center {
+      text-align: center;
+    }
   </style>
 </head>
 <body>
-  <header>
-    <h1>Notebook/Carrelli Booking</h1>
-    <span class="spacer"></span>
-    <span id="userInfo" class="muted">Non autenticato</span>
-    <button id="btnLogout" class="secondary hide">Esci</button>
-  </header>
+  <header>📘 Prenotazione Notebook / Carrelli</header>
 
   <main>
-    <!-- LOGIN -->
-    <section id="secLogin">
-      <h2>Login amministratore</h2>
-      <form id="formLogin">
-        <div class="row">
-          <label for="email">Email</label>
-          <input id="email" type="email" placeholder="admin@example.com" required />
-        </div>
-        <div class="row">
-          <label for="password">Password</label>
-          <input id="password" type="password" placeholder="••••••" required />
-        </div>
-        <button type="submit">Entra</button>
-      </form>
-      <p class="muted">Oppure login con codice docente nella tua app esistente.</p>
+    <section id="login">
+      <h2>Accesso docente</h2>
+      <p class="muted">Inserisci il tuo codice personale per accedere.</p>
+      <input id="teacherCode" placeholder="Codice docente" />
+      <button id="btnLoginCode">Accedi</button>
     </section>
 
-    <!-- ADMIN DASHBOARD -->
-    <section id="secAdmin" class="hide">
-      <h2>Dashboard admin</h2>
+    <section id="dashboard" style="display:none;">
+      <h2>Prenotazioni</h2>
+      <p class="muted" id="welcome"></p>
+      <button id="btnLogout" class="secondary">Esci</button>
 
-      <!-- EXPORT DOCENTI -->
-      <section>
-        <div class="toolbar">
-          <strong>Esporta docenti (CSV)</strong>
-          <label class="muted">Attivi:
-            <select id="fActive">
-              <option value="">(tutti)</option>
-              <option value="1">Solo attivi</option>
-              <option value="0">Solo disattivi</option>
-            </select>
-          </label>
-          <label class="muted">Ruolo:
-            <select id="fRole">
-              <option value="">(tutti)</option>
-              <option value="user">user</option>
-              <option value="admin">admin</option>
-            </select>
-          </label>
-          <button id="btnExportCsv">Esporta CSV</button>
-        </div>
-        <p class="muted">Genera un CSV in formato “Nome;Cognome;Codice;Email;Ruolo;Attivo” con BOM UTF-8 (compatibile Excel).</p>
-      </section>
+      <h3>Le tue prenotazioni</h3>
+      <table id="tblBookings">
+        <thead>
+          <tr>
+            <th>Data</th><th>Notebook</th><th>Ora/Periodo</th><th>Classe</th><th>Aula</th><th></th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
 
-      <!-- LISTA DOCENTI (preview) -->
-      <section>
-        <div class="toolbar">
-          <strong>Docenti</strong>
-          <button id="btnReloadTeachers" class="secondary">Ricarica</button>
-        </div>
-        <div class="grid">
-          <table id="tblTeachers">
-            <thead>
-              <tr>
-                <th>Nome</th><th>Cognome</th><th>Codice</th><th>Email</th><th>Ruolo</th><th>Attivo</th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
-          <p class="muted">Questa è solo una preview, l’export completo usa il pulsante qui sopra.</p>
-        </div>
-      </section>
-    </section>
-
-    <!-- SEZIONE UTENTE LOGGATO (non admin) -->
-    <section id="secUser" class="hide">
-      <h2>Area utente</h2>
-      <p>Se non sei admin, puoi utilizzare le funzioni utente dalla tua UI. (Questa pagina si concentra sull’export docenti).</p>
+      <h3>Nuova prenotazione</h3>
+      <div>
+        <label>Data <input type="date" id="date"></label><br><br>
+        <label>Periodo 
+          <select id="period"></select>
+        </label><br><br>
+        <label>Notebook 
+          <select id="notebook"></select>
+        </label><br><br>
+        <label>Classe <input id="class" placeholder="es. 3A"></label><br><br>
+        <label>Aula <input id="room" placeholder="es. Lab1"></label><br><br>
+        <button id="btnBook">Prenota</button>
+      </div>
     </section>
   </main>
 
